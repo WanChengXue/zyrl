@@ -72,7 +72,7 @@ class ShortLongReward:
         current_ap = price_info["current_AP"]
         return current_mp - current_ap - self._commission_value
 
-    def __call__(self, price_info, action, current_holding)-> tuple[np.ndarray, int]:
+    def __call__(self, price_info, action, current_holding) -> tuple[np.ndarray, int]:
         if action in ["OpenLong", "LONG"]:
             return self.open_long_reward(price_info, current_holding), 1
         elif action in ["CloseLong", "PLONG"]:
