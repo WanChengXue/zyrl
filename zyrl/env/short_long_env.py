@@ -170,6 +170,12 @@ class ShortLongEnv(gym.Env):
             else:
                 return "OpenLong"
 
+    def get_index_state_dict(self) -> dict[int, float]:
+        return self._state_table
+
+    def get_percentile_dict(self) -> dict[str, float]:
+        return self._percentile_dict
+
     def init_state_table(self):
         file_list = os.listdir(self._training_data_path)
         predict_value_list = []
@@ -214,5 +220,9 @@ class ShortLongEnv(gym.Env):
         else:
             return len(self._state_table) + 1
 
-    def get_start_index_list(self):
-        pass
+    def get_start_index_list(self, state_index: int):
+        start_index_list = []
+        for index, value in enumerate(self._training_data["FW_label"].values):
+            if value <= self._state_table[state_index]:
+                start_index_list.append(index)
+        return start_index_list
