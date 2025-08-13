@@ -16,7 +16,11 @@ class ShortLongEnv(gym.Env):
         self._test_data_path = config.get("test_data_path", None)
         self._test_market_data_path = config.get("test_market_data_path", None)
         self._current_holding = config.get("init_holding", 0)
-        self._commission_value = config.get("commission_value", 0.012)
+        self._commission_value = config.get("commission_value", 0.12)
+        self._util_termination = config.get("util_termination", False)
+        self._percentile_dict = config["percentile_dict"]
+        self._state_table = config["state_table"]
+        self._index_state_dict = config["index_state_dict"]
         self.observation_space = gym.spaces.Dict(
             {
                 "forward_value_index": gym.spaces.Box(low=0, high=1, shape=(1,)),
@@ -26,7 +30,6 @@ class ShortLongEnv(gym.Env):
         self.action_space = gym.spaces.Discrete(3)
         self._start_index = 0
         self._reward_function = ShortLongReward(self._commission_value)
-        self.init_state_table()
 
     def _load_data(
         self, data_path: str, market_data_path: str, file_name: str | None = None
@@ -90,7 +93,7 @@ class ShortLongEnv(gym.Env):
             file_name = option.get("file_name", None)
             start_index = option.get("start_index", 0)
         else:
-            file_name = None
+            file_name = self._config["file_name"]
             start_index = 0
         if self._training_data_path is not None:
             self._training_data, self._training_market_data = self._load_data(
@@ -127,7 +130,7 @@ class ShortLongEnv(gym.Env):
         reward, next_holding = self._reward_function(
             price_info, action_op, self._current_holding
         )
-        done = self._done(next_holding)
+        done = self._done(next_holding, self._util_termination)
         self._current_holding = next_holding
         self._current_index += 1
         state, predict_value = self._get_current_state_data(self._current_index)
@@ -140,10 +143,13 @@ class ShortLongEnv(gym.Env):
         info.update(price_info)
         return state, reward, done, False, info
 
-    def _done(self, next_holding: int) -> bool:
-        if self._current_index == len(self._training_data) - 1:
-            return True
+    def _done(self, next_holding: int, util_termination: bool = False) -> bool:
+        if util_termination:
+            if self._current_index >= len(self._training_data) - 2:
+                return True
         else:
+            if self._current_index >= len(self._training_data) - 2:
+                return True
             if next_holding == 0:
                 return True
             else:
@@ -176,53 +182,30 @@ class ShortLongEnv(gym.Env):
     def get_percentile_dict(self) -> dict[str, float]:
         return self._percentile_dict
 
-    def init_state_table(self):
-        file_list = os.listdir(self._training_data_path)
-        predict_value_list = []
-        self._percentile_dict = {}
-        self._state_table = {}
-        for file_name in file_list:
-            data = load_dataframe(os.path.join(self._training_data_path, file_name))
-            predict_value_list.append(data["FW_label"].values)
-        predict_value_list = np.concatenate(predict_value_list)
-        percentile_list = [
-            0.5,
-            1,
-            2,
-            3,
-            4,
-            5,
-            10,
-            20,
-            30,
-            40,
-            50,
-            60,
-            70,
-            80,
-            90,
-            95,
-            96,
-            97,
-            98,
-            99,
-            99.5,
-        ]
-        for index, percentile in enumerate(percentile_list):
-            percentile_value = np.percentile(predict_value_list, percentile)
-            self._percentile_dict[f"{100-percentile}%"] = percentile_value
-            self._state_table[percentile_value] = len(percentile_list) - index
-
     def _get_state_table_index(self, predict_value: float) -> int:
-        for key, value in self._state_table.items():
-            if predict_value < key:
-                return value
-        else:
-            return len(self._state_table) + 1
+        for key in sorted(self._state_table.keys(), reverse=True):
+            if predict_value >= key:
+                return self._state_table[key]
+        return len(self._state_table) + 1
 
-    def get_start_index_list(self, state_index: int):
+    @classmethod
+    def get_start_index_list(
+        cls, file_path: str, state_index: int, index_state_dict: dict[int, float]
+    ):
         start_index_list = []
-        for index, value in enumerate(self._training_data["FW_label"].values):
-            if value <= self._state_table[state_index]:
-                start_index_list.append(index)
-        return start_index_list
+        loaded_data = load_dataframe(file_path)
+        for index, value in enumerate(loaded_data["FW_label"].values):
+            if state_index == 22:
+                if index_state_dict[21] > value:
+                    start_index_list.append(index)
+            else:
+                if (
+                    index_state_dict[state_index] <= value
+                    and index <= len(loaded_data) - 10
+                ):
+                    start_index_list.append(index)
+        if len(start_index_list) >= 100:
+            random_start_index_list = random.sample(start_index_list, 100)
+            return random_start_index_list
+        else:
+            return start_index_list
