@@ -188,6 +188,9 @@ class ShortLongEnv(gym.Env):
                 return self._state_table[key]
         return len(self._state_table) + 1
 
+    def get_state_index(self, state: dict[str, np.ndarray]) -> int:
+        return state["forward_value_index"].item()
+
     @classmethod
     def get_start_index_list(
         cls, file_path: str, state_index: int, index_state_dict: dict[int, float]
