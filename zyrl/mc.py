@@ -12,16 +12,29 @@ import time
 
 
 class MCFromStart:
-    def __init__(self, config):
-        self._file_path = config.get("file_path")
-        self._saved_q_table_path = config.get("saved_q_table_path")
-        self._config = config
-        self._gamma = config.get("gamma", 0.99)
-        self._init_q_table()
-        self._init_state_table_by_percentile()
-        self._read_data_list()
+    def __init__(
+        self,
+        env_class: type[ShortLongEnv],
+        init_q_table: pd.DataFrame,
+        env_config: dict,
+        mc_config: dict,
+    ):
+        self._saved_q_table_path = mc_config.get("saved_q_table_path")
+        self._saved_count_table_path = mc_config.get("saved_count_table_path")
+        self._mc_config = mc_config
+        self._env_config = env_config
+        self._gamma = mc_config.get("gamma", 0.99)
+        self._q_table = init_q_table
+        self._env_class = env_class
+        self._init_count_table()
 
-    def _init_q_table(self):
+    def _init_count_table(self):
+        self._sample_point_count_table = pd.DataFrame(
+            index=self._q_table.index, columns=self._q_table.columns
+        )
+        self._sample_point_count_table.fillna(0, inplace=True)
+
+    def _init_q_table_bak(self):
         holding_list = [1, 0, -1]
         state_table_index_list = [i + 1 for i in range(22)]
         action_list = [-1, 0, 1]
@@ -117,9 +130,6 @@ class MCFromStart:
                 return value
         return len(state_table) + 1
 
-    def _read_data_list(self):
-        self._file_list = os.listdir(self._file_path)
-
     def run(self):
         end_flag = False
         while not end_flag:
@@ -130,7 +140,7 @@ class MCFromStart:
 
     def _saved_q_table(self):
         self._q_table.to_csv(self._saved_q_table_path)
-        self._sample_point_count_table.to_csv("./sample_point_count_table.csv")
+        self._sample_point_count_table.to_csv(self._saved_count_table_path)
 
     def _end_check(self, current_state: pd.DataFrame, next_state: pd.DataFrame) -> bool:
         mse_error = np.mean((current_state.values - next_state.values) ** 2)
@@ -138,35 +148,46 @@ class MCFromStart:
             return True
         return False
 
-    def _convert_tuple_index_to_int(self):
-        self._tuple_to_int_dict = {}
-        for index, tuple_index in enumerate(self._sample_point_count_table.index):
-            self._tuple_to_int_dict[tuple_index] = index
 
     def _update_q_table(self, return_dict: dict[int, list[float]]):
-        for holding, state_index in self._sample_point_count_table.index:
-            for action_ind, action in enumerate(self._q_table.columns):
-                if (state_index, holding, action) not in return_dict:
+        for state_index in self._sample_point_count_table.index:
+            for action_ind, _ in enumerate(self._q_table.columns):
+                if (state_index, action_ind) not in return_dict:
                     continue
-                count_num = self._sample_point_count_table.iloc[
-                    self._tuple_to_int_dict[(holding, state_index)]
-                ][action]
-                self._q_table.iloc[
-                    self._tuple_to_int_dict[(holding, state_index)], action_ind
-                ] = (
-                    self._q_table.iloc[self._tuple_to_int_dict[(holding, state_index)]][
-                        action
-                    ]
-                    * count_num
-                    + np.sum(return_dict[state_index, holding, action])
-                ) / (
-                    count_num + len(return_dict[state_index, holding, action])
+                count_num = self._sample_point_count_table.iloc[state_index][action_ind]
+                self._q_table.iloc[state_index][action_ind] = (
+                    self._q_table.iloc[state_index][action_ind] * count_num
+                    + np.sum(return_dict[state_index, action_ind])
+                ) / (count_num + len(return_dict[state_index, action_ind]))
+                self._sample_point_count_table.iloc[state_index][action_ind] = (
+                    count_num + len(return_dict[state_index, action_ind])
                 )
-                self._sample_point_count_table.iloc[
-                    self._tuple_to_int_dict[(holding, state_index)], action_ind
-                ] = count_num + len(return_dict[state_index, holding, action])
 
     def _collect_data(self):
+        return_dict = {}
+        self._sample_env_num = self._config.get("sample_env_num", 10)
+        for state_index in tqdm(self._q_table.index):
+            for init_action in self._q_table.columns:
+                worker_list = []
+                for _ in range(self._sample_env_num):
+                    worker_config = {
+                        "init_state_index": state_index,
+                        "init_action": init_action,
+                        "q_table": self._q_table,
+                        "gamma": self._gamma,
+                        "env_config": self._config.get("env_config"),
+                    }
+                    worker_list.append(ray_worker.remote(worker_config))
+                worker_return_dict_list = ray.get(worker_list)
+                for worker_return_dict in worker_return_dict_list:
+                    for key in worker_return_dict:
+                        if key not in return_dict:
+                            return_dict[key] = worker_return_dict[key]
+                        else:
+                            return_dict[key].extend(worker_return_dict[key])
+        self._update_q_table(return_dict)
+
+    def _collect_data_bak(self):
         return_dict = {}
         for init_holding, init_state_index in tqdm(self._q_table.index):
             for init_action in self._q_table.columns:
