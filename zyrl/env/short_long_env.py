@@ -59,7 +59,7 @@ class ShortLongEnv(gym.Env):
         else:
             raise FileNotFoundError(f"数据文件不存在: {data_path}")
 
-    def _get_current_state_data(self, index: int) -> dict[str, np.ndarray]:
+    def _get_current_state_data(self, index: int) -> tuple[dict[str, np.ndarray], int]:
         predict_value_row = self._training_data.iloc[index]
         predict_value = float(predict_value_row["FW_label"])
         predict_value_index = self._get_state_table_index(predict_value)
@@ -120,7 +120,7 @@ class ShortLongEnv(gym.Env):
             self._current_holding = current_holding
         return file_name, start_index
 
-    def reset(self, option: dict | None = None):
+    def reset(self, option: dict[str, Any] | None = None):
         if "file_name" in option:
             file_name = option["file_name"]
             start_index = option.get("start_index", 0)

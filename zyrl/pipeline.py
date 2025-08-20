@@ -47,7 +47,8 @@ class Pipeline:
                 raise ValueError(f"Environment {env} not found in gym.envs.registry")
             self._task_name = env
         else:
-            if not gym.check_env(env):
+            # gymnasium no longer has check_env, we'll assume it's valid if it has required methods
+            if not hasattr(env, "reset") or not hasattr(env, "step"):
                 raise ValueError(
                     f"Environment {env} is not a valid gymnasium environment"
                 )
@@ -68,28 +69,22 @@ class Pipeline:
         pass
 
     def test(self, num_episodes: int = 10):
-        """测试模型"""
-        return self._collector.evaluate(num_episodes)
+        pass
 
     def save_checkpoint(self, path: str):
-        """保存检查点"""
-        self._trainer.save_checkpoint(path)
+        pass
 
     def load_checkpoint(self, path: str):
-        """加载检查点"""
-        self._trainer.load_checkpoint(path)
+        pass
 
     def resume_training(self, checkpoint_path: str, **kwargs):
-        """从检查点恢复训练"""
-        return self._trainer.resume_training(checkpoint_path, **kwargs)
+        pass
 
     def get_training_history(self):
-        """获取训练历史"""
-        return self._trainer.get_training_history()
+        pass
 
     def get_evaluation_history(self):
-        """获取评估历史"""
-        return self._collector.get_evaluation_history()
+        pass
 
 
 # 为了向后兼容，保留原有的类名

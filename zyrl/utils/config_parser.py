@@ -14,7 +14,7 @@ class ConfigNode:
         self.name = name
         self.value = value
         self.parent = parent
-        self.children = {}
+        self.children: dict[str, "ConfigNode"] = {}
         self.is_leaf = value is not None
 
     def add_child(self, name: str, value: Any = None):
@@ -69,10 +69,10 @@ class ConfigNode:
 
 
 class ConfigParser:
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str | None = None):
         self.config_path = config_path
         self._root = ConfigNode("root")
-        self._flat_dict = {}
+        self._flat_dict: Dict[str, Any] = {}
 
         if config_path:
             self._load_config()
@@ -83,7 +83,9 @@ class ConfigParser:
         self._build_tree(config_dict)
         self._update_flat_dict()
 
-    def _build_tree(self, config_dict: Dict[str, Any], parent: ConfigNode = None):
+    def _build_tree(
+        self, config_dict: Dict[str, Any], parent: Optional[ConfigNode] = None
+    ):
         """构建配置树"""
         if parent is None:
             parent = self._root
@@ -165,7 +167,7 @@ class ConfigParser:
 
         self.merge(config_dict, overwrite)
 
-    def save(self, file_path: str = None):
+    def save(self, file_path: Optional[str] = None):
         """保存配置到文件"""
         if file_path is None:
             file_path = self.config_path
