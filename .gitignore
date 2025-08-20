@@ -104,7 +104,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
-env/
+# env/
 venv/
 ENV/
 env.bak/
@@ -130,3 +130,6 @@ dmypy.json
 
 # templates
 .github/templates/*
+*.csv
+/figure
+/table

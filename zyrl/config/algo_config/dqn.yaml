@@ -1,0 +1,9 @@
+trainer:
+  eps_train: 0.1
+  eps_test: 0.05
+
+algo:
+  discount_factor: 0.97
+  estimation_step: 3
+  target_update_freq: 100
+  soft_update_tau: 0.005

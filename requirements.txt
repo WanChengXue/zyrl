@@ -1,5 +1,6 @@
-# This template is a low-dependency template. 
-# By default there is no requirements added here.
-# Add the requirements you need to this file.
-# or run `make init` to create this file automatically based on the template.
-# You can also run `make switch-to-poetry` to use the poetry package manager.
+torch>=1.9.0
+gymnasium>=0.28.0
+pyyaml>=6.0
+numpy>=1.21.0
+tensorboard>=2.8.0
+git+https://github.com/thu-ml/tianshou.git@master
