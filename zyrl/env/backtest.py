@@ -40,73 +40,26 @@ class BacktestWorker:
     def __init__(self, config: dict):
         self._config = config
         self._load_q_table()
-        self._init_state_table_by_percentile()
         self._init_env()
-
-    def _init_state_table_by_percentile(self):
-        training_data_path = self._config["env_config"]["training_data_path"]
-        file_list = os.listdir(training_data_path)
-        predict_value_list = []
-        self._percentile_dict = {}
-        self._state_table = {}
-        self._index_state_dict = {}
-        for file_name in file_list:
-            data = load_dataframe(os.path.join(training_data_path, file_name))
-            predict_value_list.append(data["FW_label"].values)
-        predict_value_list = np.concatenate(predict_value_list)
-        percentile_list = [
-            0.5,
-            1,
-            2,
-            3,
-            4,
-            5,
-            10,
-            20,
-            30,
-            40,
-            50,
-            60,
-            70,
-            80,
-            90,
-            95,
-            96,
-            97,
-            98,
-            99,
-            99.5,
-        ]
-        for index, percentile in enumerate(percentile_list):
-            percentile_value = np.percentile(predict_value_list, percentile)
-            self._percentile_dict[f"{100-percentile}%"] = percentile_value
-            self._state_table[percentile_value] = len(percentile_list) - index
-            self._index_state_dict[len(percentile_list) - index] = percentile_value
-        self._config["env_config"]["percentile_dict"] = self._percentile_dict
-        self._config["env_config"]["state_table"] = self._state_table
-        self._config["env_config"]["index_state_dict"] = self._index_state_dict
 
     def _load_q_table(self):
         self._q_table = load_dataframe(self._config["q_table_path"])
-        self._tuple_to_int_dict = {}
-        for index, tuple_index in enumerate(self._q_table.index):
-            self._tuple_to_int_dict[tuple_index] = index
 
     def _init_env(self):
         self._env = ShortLongEnv(self._config["env_config"])
 
     def _get_action(self, state: gym.spaces.Dict):
-        state_index = state["forward_value_index"].item()
-        holding = state["holding"].item()
-        q_index = self._tuple_to_int_dict[f"({holding}, {state_index})"]
-        q_list = self._q_table.iloc[q_index]
+        q_table_index = self._env.get_state_index(state)
+        q_list = self._q_table.iloc[q_table_index]
         action = q_list.idxmax()
         return int(action)
 
     def run(self):
         reward_list = []
         done = False
-        current_state, info = self._env.reset()
+        current_state, info = self._env.reset(
+            option={"file_name": self._config["env_config"]["file_name"]}
+        )
         while not done:
             action = self._get_action(current_state)
             current_state, reward, done, _, info = self._env.step(action)

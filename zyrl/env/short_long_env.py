@@ -18,18 +18,30 @@ class ShortLongEnv(gym.Env):
         self._current_holding = config.get("init_holding", 0)
         self._commission_value = config.get("commission_value", 0.12)
         self._util_termination = config.get("util_termination", False)
-        self._percentile_dict = config["percentile_dict"]
-        self._state_table = config["state_table"]
-        self._index_state_dict = config["index_state_dict"]
+        self._load_state_index()
         self.observation_space = gym.spaces.Dict(
             {
-                "forward_value_index": gym.spaces.Box(low=0, high=1, shape=(1,)),
+                "forward_value": gym.spaces.Box(low=-10, high=10, shape=(1,)),
                 "holding": gym.spaces.Box(low=-1, high=1, shape=(1,)),
             }
         )
         self.action_space = gym.spaces.Discrete(3)
         self._start_index = 0
         self._reward_function = ShortLongReward(self._commission_value)
+
+    def _load_state_index(self):
+        self._percentile_dict = np.load(
+            self._config["percentile_dict_path"], allow_pickle=True
+        ).item()
+        self._state_table = np.load(
+            self._config["state_table_path"], allow_pickle=True
+        ).item()
+        self._index_state_dict = np.load(
+            self._config["index_state_dict_path"], allow_pickle=True
+        ).item()
+        self._state_index_mapping = np.load(
+            self._config["state_index_mapping_path"], allow_pickle=True
+        ).item()
 
     def _load_data(
         self, data_path: str, market_data_path: str, file_name: str | None = None
@@ -53,9 +65,9 @@ class ShortLongEnv(gym.Env):
         predict_value_index = self._get_state_table_index(predict_value)
         holding = np.array([self._current_holding])
         return {
-            "forward_value_index": np.array([predict_value_index]),
+            "forward_value": np.array([predict_value]),
             "holding": holding,
-        }, predict_value
+        }, predict_value_index
 
     def _get_market_data(self, ts_str: str) -> dict[str, np.ndarray]:
         least_ts_str_list = np.where(
@@ -88,25 +100,47 @@ class ShortLongEnv(gym.Env):
             "next_BP": np.array([next_BP]),
         }
 
+    def _random_start_index(
+        self, init_state_index: int | None = None
+    ) -> tuple[str, int]:
+        file_list = os.listdir(self._training_data_path)
+        file_name = random.choice(file_list)
+        if init_state_index is None:
+            start_index = 0
+        else:
+            fw_value_index, current_holding = self._state_index_mapping[
+                "index_to_state"
+            ][init_state_index]
+            start_index_list = self.get_start_index_list(
+                os.path.join(self._training_data_path, file_name),
+                fw_value_index,
+                self._index_state_dict,
+            )
+            start_index = random.choice(start_index_list)
+            self._current_holding = current_holding
+        return file_name, start_index
+
     def reset(self, option: dict | None = None):
-        if option is not None:
-            file_name = option.get("file_name", None)
+        if "file_name" in option:
+            file_name = option["file_name"]
             start_index = option.get("start_index", 0)
         else:
-            file_name = self._config["file_name"]
-            start_index = 0
+            init_state_index = option.get("init_state_index", None)
+            file_name, start_index = self._random_start_index(init_state_index)
+
         if self._training_data_path is not None:
             self._training_data, self._training_market_data = self._load_data(
                 self._training_data_path, self._training_market_data_path, file_name
             )
             self._current_index = start_index
             self._total_index = len(self._training_data)
-            self._current_holding = self._config.get("init_holding", 0)
-            state, predict_value = self._get_current_state_data(self._current_index)
+            state, predict_value_index = self._get_current_state_data(
+                self._current_index
+            )
             info = {
                 "current_holding": self._current_holding,
                 "current_index": self._current_index,
-                "predict_value": predict_value,
+                "predict_value_index": predict_value_index,
             }
             info.update(
                 {
@@ -189,21 +223,28 @@ class ShortLongEnv(gym.Env):
         return len(self._state_table) + 1
 
     def get_state_index(self, state: dict[str, np.ndarray]) -> int:
-        return state["forward_value_index"].item()
+        state_index = self._get_state_table_index(state["forward_value"].item())
+        holding = state["holding"].item()
+        return self._state_index_mapping["state_to_index"][(state_index, holding)]
 
     @classmethod
     def get_start_index_list(
-        cls, file_path: str, state_index: int, index_state_dict: dict[int, float]
+        cls, file_path: str, fw_value_index: int, index_state_dict: dict[int, float]
     ):
         start_index_list = []
         loaded_data = load_dataframe(file_path)
         for index, value in enumerate(loaded_data["FW_label"].values):
-            if state_index == 22:
+            if fw_value_index == 22 and index <= len(loaded_data) - 10:
                 if index_state_dict[21] > value:
+                    start_index_list.append(index)
+            elif fw_value_index == 1 and index <= len(loaded_data) - 10:
+                if index_state_dict[1] < value:
                     start_index_list.append(index)
             else:
                 if (
-                    index_state_dict[state_index] <= value
+                    fw_value_index not in [1, 22]
+                    and index_state_dict[fw_value_index] <= value
+                    and index_state_dict[fw_value_index - 1] > value
                     and index <= len(loaded_data) - 10
                 ):
                     start_index_list.append(index)

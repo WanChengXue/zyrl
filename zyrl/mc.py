@@ -1,15 +1,25 @@
-# from tianshou.env import RayVectorEnv
-import pandas as pd
-import os
+"""Monte Carlo reinforcement learning implementation with Ray distributed computing.
+
+This module provides a Monte Carlo method implementation for reinforcement learning
+that uses Ray for distributed computation to improve performance.
+"""
+
 import copy
+import time
+import pandas as pd
 from tqdm import tqdm
 import numpy as np
 
 import ray
-import time
 
 
 class MCFromStart:
+    """Monte Carlo reinforcement learning agent that learns from complete episodes.
+
+    This class implements Monte Carlo control with exploring starts, using distributed
+    computing via Ray to collect experience data and update Q-values.
+    """
+
     def __init__(
         self,
         env_class,
@@ -53,21 +63,21 @@ class MCFromStart:
 
     def _update_q_table(self, return_dict: dict[int, list[float]]):
         for state_index in self._sample_point_count_table.index:
-            for action_ind, _ in enumerate(self._q_table.columns):
-                if (state_index, action_ind) not in return_dict:
+            for action_ind, action in enumerate(self._q_table.columns):
+                if (state_index, action) not in return_dict:
                     continue
-                count_num = self._sample_point_count_table.iloc[state_index][action_ind]
-                self._q_table.iloc[state_index][action_ind] = (
-                    self._q_table.iloc[state_index][action_ind] * count_num
-                    + np.sum(return_dict[state_index, action_ind])
-                ) / (count_num + len(return_dict[state_index, action_ind]))
-                self._sample_point_count_table.iloc[state_index][action_ind] = (
-                    count_num + len(return_dict[state_index, action_ind])
+                count_num = self._sample_point_count_table.iloc[state_index][action]
+                self._q_table.iloc[state_index, action_ind] = (
+                    self._q_table.iloc[state_index][action] * count_num
+                    + np.sum(return_dict[state_index, action])
+                ) / (count_num + len(return_dict[state_index, action]))
+                self._sample_point_count_table.iloc[state_index, action_ind] = (
+                    count_num + len(return_dict[state_index, action])
                 )
 
     def _collect_data(self):
         return_dict = {}
-        self._sample_env_num = self._config.get("sample_env_num", 10)
+        self._sample_env_num = self._mc_config.get("sample_env_num", 10)
         for state_index in tqdm(self._q_table.index):
             for init_action in self._q_table.columns:
                 worker_list = []
@@ -78,59 +88,22 @@ class MCFromStart:
                         "q_table": self._q_table,
                         "gamma": self._gamma,
                         "env_class": self._env_class,
-                        "env_config": self._config.get("env_config"),
+                        "env_config": self._env_config,
                     }
+
                     worker_list.append(ray_worker.remote(worker_config))
+                # if state_index == 49 and init_action == 0:
+                #     print("debug")
+                #     worker = RayWorker(worker_config)
+                #     worker_return_dict_list = [worker.run(init_action)]
                 worker_return_dict_list = ray.get(worker_list)
                 for worker_return_dict in worker_return_dict_list:
                     for key in worker_return_dict:
                         if key not in return_dict:
-                            return_dict[key] = worker_return_dict[key]
+                            return_dict[key] = [worker_return_dict[key]]
                         else:
-                            return_dict[key].extend(worker_return_dict[key])
+                            return_dict[key].append(worker_return_dict[key])
         self._update_q_table(return_dict)
-
-    def _collect_data_bak(self):
-        return_dict = {}
-        for init_holding, init_state_index in tqdm(self._q_table.index):
-            for init_action in self._q_table.columns:
-                if not (init_holding, init_action) == (0, 0):
-                    worker_list = []
-                    for file_name in self._file_list:
-                        worker_config = {
-                            "file_name": file_name,
-                            "init_state_index": init_state_index,
-                            "init_holding": init_holding,
-                            "q_table": self._q_table,
-                            "gamma": self._gamma,
-                            "training_data_path": self._config.get(
-                                "training_data_path"
-                            ),
-                            "training_market_data_path": self._config.get(
-                                "training_market_data_path"
-                            ),
-                            "test_data_path": self._config.get("test_data_path"),
-                            "test_market_data_path": self._config.get(
-                                "test_market_data_path"
-                            ),
-                            "commission_value": self._config.get(
-                                "commission_value", 0.12
-                            ),
-                            "init_action": init_action,
-                            "percentile_dict": self._percentile_dict,
-                            "state_table": self._state_table,
-                            "index_state_dict": self._index_state_dict,
-                        }
-                        worker_list.append(ray_worker.remote(worker_config))
-                    worker_return_dict_list = ray.get(worker_list)
-                    for worker_return_dict in worker_return_dict_list:
-                        for key in worker_return_dict:
-                            if key not in return_dict:
-                                return_dict[key] = worker_return_dict[key]
-                            else:
-                                return_dict[key].extend(worker_return_dict[key])
-                    # fix (state_index, holding, action), N个episodes, update Q(s,a)
-                    self._update_q_table(return_dict)
 
 
 @ray.remote
@@ -141,48 +114,19 @@ def ray_worker(config):
     return return_dict
 
 
-@ray.remote
-def ray_node(config, start_option):
-    ray_node = RayNode(config)
-    return ray_node.run(start_option)
-
-
 class RayWorker:
     def __init__(self, config):
         self._config = config
         self._return_dict = {}
         self._env_class = config.get("env_class")
-        # self._init_start_index_list()
-
-    # def _init_start_index_list(self):
-    #     file_path = os.path.join(
-    #         self._config["training_data_path"], self._config["file_name"]
-    #     )
-    #     state_index = self._config["init_state_index"]
-    #     index_state_dict = self._config["index_state_dict"]
-    #     self._start_index_list = ShortLongEnv.get_start_index_list(
-    #         file_path, state_index, index_state_dict
-    #     )
 
     def run(self, init_action: int):
-        return_dict = {}
-        ray_node_return_list = []
-        # for start_index in self._start_index_list:
         start_option = {
             "init_action": init_action,
         }
         worker_node = RayNode(self._config, self._env_class)
         ray_node_return = worker_node.run(start_option)
-        ray_node_return_list.append(ray_node_return)
-        #     ray_node_list.append(ray_node.remote(self._config, start_option))
-        # ray_node_return_list = ray.get(ray_node_list)
-        for ray_node_return in ray_node_return_list:
-            for key in ray_node_return:
-                if key not in return_dict:
-                    return_dict[key] = ray_node_return[key]
-                else:
-                    return_dict[key].extend(ray_node_return[key])
-        return return_dict
+        return ray_node_return
 
 
 class RayNode:
@@ -192,26 +136,33 @@ class RayNode:
         self._return_dict = {}
         self._gamma = config.get("gamma", 0.99)
         self._return_container = StateIndexReturnContainer(self._gamma)
-        self._env = env_class(config)
+        self._env = env_class(config["env_config"])
 
     def run(self, start_option: dict):
         init_action = start_option["init_action"]
         first_flag = True
         self._return_container.clear()
         done = False
-        current_state, info = self._env.reset()
+        current_state, info = self._env.reset(
+            {"init_state_index": self._init_state_index}
+        )
         while True:
             state_index = self._env.get_state_index(current_state)
             q_list = self._q_table.iloc[state_index]
 
             # 添加调试信息
-            action = init_action if first_flag else q_list.idxmax()
+            if first_flag:
+                action = init_action
+                assert state_index == self._init_state_index
+            else:
+                action = q_list.idxmax()
 
             first_flag = False
 
             next_state, reward, done, _, info = self._env.step(action)
             # log_list.append([info["predict_value"], info["current_holding"], current_state["forward_value_index"].item(), action, reward])
             self._return_container.add_reward(
+                reward,
                 state_index,
                 action,
             )
@@ -243,13 +194,10 @@ class StateIndexReturnContainer:
 
         for index in range(len(self._state_index_list)):
             if self._state_index_list[index] not in index_return_dict:
-                index_return_dict[self._state_index_list[index]] = [
-                    reversed_return_list[index]
+                index_return_dict[self._state_index_list[index]] = reversed_return_list[
+                    index
                 ]
-            # else:
-            #     index_return_dict[self._state_index_list[index]].append(
-            #         reversed_return_list[index]
-            #     )
+
         return index_return_dict
 
     def _log_return(self):

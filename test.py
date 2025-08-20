@@ -113,13 +113,14 @@ def test_mc():
         "state_table_path": "./data/state_table.npy",
         "index_state_dict_path": "./data/index_state_dict.npy",
         "percentile_dict_path": "./data/percentile_dict.npy",
+        "state_index_mapping_path": "./data/state_index_mapping.npy",
     }
 
     mc_config = {
         "saved_q_table_path": "./q_table.csv",
         "saved_count_table_path": "./count_table.csv",
         "gamma": 0.99,
-        "sample_env_num": 10,
+        "sample_env_num": 30,
     }
 
     mc = MCFromStart(ShortLongEnv, init_q_table(), env_config, mc_config)
@@ -135,7 +136,10 @@ def test_backtest():
             "training_market_data_path": "data/market_data",
             "commission_value": 0.12,
             "util_termination": True,
-            "file_name": "20241101_am.csv",
+            "state_index_mapping_path": "./data/state_index_mapping.npy",
+            "state_table_path": "./data/state_table.npy",
+            "index_state_dict_path": "./data/index_state_dict.npy",
+            "percentile_dict_path": "./data/percentile_dict.npy",
         },
     }
     backtest = Backtest(config)
@@ -143,11 +147,11 @@ def test_backtest():
     cum_reward_list = np.cumsum(reward_list)
     plt.plot(cum_reward_list)
     plt.show()
-    plt.savefig("./figure/cusum_reward.png")
+    plt.savefig("./figure/cusum_reward_20250818.png")
     plt.close()
 
 
-# test_backtest()
+test_backtest()
 # init_percentile_dict(
 #     training_data_path="data/predict_data",
 #     state_table_saved_path="./data/state_table.npy",
@@ -155,4 +159,16 @@ def test_backtest():
 #     percentile_dict_saved_path="./data/percentile_dict.npy",
 # )
 
-test_mc()
+# test_mc()
+# index = 0
+# state_index_mapping = {
+#     "index_to_state": {},
+#     "state_to_index": {},
+# }
+# for act in [1, 0, -1]:
+#     for i in range(1,23):
+#         state_index_mapping["index_to_state"][index] = (i, act)
+#         state_index_mapping["state_to_index"][(i, act)] = index
+#         index += 1
+
+# np.save("./data/state_index_mapping.npy", state_index_mapping)
