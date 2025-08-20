@@ -4,3 +4,4 @@ gymnasium>=0.28.0
 pyyaml>=6.0
 numpy>=1.21.0
 tensorboard>=2.8.0
+tianshou>=1.0.0
