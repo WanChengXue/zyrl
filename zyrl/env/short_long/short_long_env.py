@@ -5,7 +5,7 @@ import os
 import numpy as np
 import random
 from zyrl.utils.table_utils import load_dataframe
-from zyrl.env.reward import ShortLongReward
+from zyrl.env.short_long.reward import ShortLongReward
 
 
 class ShortLongEnv(gym.Env):
@@ -120,7 +120,9 @@ class ShortLongEnv(gym.Env):
             self._current_holding = current_holding
         return file_name, start_index
 
-    def reset(self, option: dict[str, Any] | None = None):
+    def reset(
+        self, option: dict[str, Any] | None = None
+    ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         if "file_name" in option:
             file_name = option["file_name"]
             start_index = option.get("start_index", 0)
