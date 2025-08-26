@@ -89,6 +89,6 @@ def jump_trade_period(last_ts: str, current_ts: str) -> bool:
 
 if __name__ == "__main__":
     split_table(
-        table_path="/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/tradeRateTable.feather",
-        saved_path="/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/mutli_action_data",
+        table_path="/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/split_state_tradeRateTable.feather",
+        saved_path="/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/split_state_action_data",
     )

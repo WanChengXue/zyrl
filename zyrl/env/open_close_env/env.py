@@ -10,11 +10,11 @@ import os
 import numpy as np
 import gymnasium as gym
 import pandas as pd
-from zyrl.env.multi_action_short_long.reward import MultiActionShortLongReward
+from zyrl.env.open_close_env.reward import MultiActionShortLongReward
 from zyrl.utils.table_utils import load_dataframe
 
 
-class MultiActionShortLongEnv(gym.Env):
+class SplitStateActionEnv(gym.Env):
     """Multi-action short-long trading environment class.
 
     This class provides a trading environment that supports multiple action types
@@ -24,6 +24,8 @@ class MultiActionShortLongEnv(gym.Env):
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
         self._data_path = config["data_path"]
+        # open_long, close_long, open_short, close_short
+        self._env_type = config["env_type"]
         self._trading_config = {
             "current_holding": config.get("init_holding", 0),
             "commission_value": config.get("commission_value", 0.12),
