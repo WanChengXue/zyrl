@@ -34,11 +34,12 @@ class SplitStateActionEnv(gym.Env):
         self._load_state_index()
         self.observation_space = gym.spaces.Dict(
             {
-                "forward_value": gym.spaces.Box(low=-10, high=10, shape=(1,)),
-                "holding": gym.spaces.Box(low=-1, high=1, shape=(1,)),
+                "delta1": gym.spaces.Box(low=0, high=1, shape=(1,)),
+                "delta2": gym.spaces.Box(low=0, high=1, shape=(1,)),
+                "delta3": gym.spaces.Box(low=0, high=1, shape=(1,)),
             }
         )
-        self.action_space = gym.spaces.Discrete(13)
+        self.action_space = gym.spaces.Discrete(4)
         self._reward_function = MultiActionShortLongReward(
             self._trading_config["commission_value"]
         )
@@ -48,15 +49,11 @@ class SplitStateActionEnv(gym.Env):
         self._training_data = None
         self._current_index = 0
         self._total_index = 0
-        self._percentile_dict = None
         self._state_table = None
         self._index_state_dict = None
         self._state_index_mapping = None
 
     def _load_state_index(self):
-        self._percentile_dict = np.load(
-            self._config["percentile_dict_path"], allow_pickle=True
-        ).item()
         self._state_table = np.load(
             self._config["state_table_path"], allow_pickle=True
         ).item()
@@ -80,15 +77,48 @@ class SplitStateActionEnv(gym.Env):
 
         raise FileNotFoundError(f"数据文件不存在: {data_path}")
 
-    def _get_current_state_data(self, index: int) -> tuple[dict[str, np.ndarray], int]:
+    def _get_current_state_data(self, index: int) -> dict[str, np.ndarray]:
         predict_value_row = self._training_data.iloc[index]
-        predict_value = float(predict_value_row["Pred"])
-        predict_value_index = self._get_state_table_index(predict_value)
-        holding = np.array([self._trading_config["current_holding"]])
-        return {
-            "forward_value": np.array([predict_value]),
-            "holding": holding,
-        }, predict_value_index
+        if self._env_type == "open_long":
+            expect_long_delta_1 = float(predict_value_row["TradeRate_NF_Long_Delta1"])
+            expect_long_delta_2 = float(predict_value_row["TradeRate_NF_Long_Delta2"])
+            expect_long_delta_3 = float(predict_value_row["TradeRate_NF_Long_Delta3"])
+            state = {
+                "delta1": np.array([expect_long_delta_1]),
+                "delta2": np.array([expect_long_delta_2]),
+                "delta3": np.array([expect_long_delta_3]),
+            }
+        elif self._env_type == "close_long":
+            expect_short_delta_1 = float(predict_value_row["TradeRate_NF_Short_Delta1"])
+            expect_short_delta_2 = float(predict_value_row["TradeRate_NF_Short_Delta2"])
+            expect_short_delta_3 = float(predict_value_row["TradeRate_NF_Short_Delta3"])
+            state = {
+                "delta1": np.array([expect_short_delta_1]),
+                "delta2": np.array([expect_short_delta_2]),
+                "delta3": np.array([expect_short_delta_3]),
+            }
+        elif self._env_type == "open_short":
+            expect_short_delta_1 = float(predict_value_row["TradeRate_NF_Short_Delta1"])
+            expect_short_delta_2 = float(predict_value_row["TradeRate_NF_Short_Delta2"])
+            expect_short_delta_3 = float(predict_value_row["TradeRate_NF_Short_Delta3"])
+            state = {
+                "delta1": np.array([expect_short_delta_1]),
+                "delta2": np.array([expect_short_delta_2]),
+                "delta3": np.array([expect_short_delta_3]),
+            }
+        elif self._env_type == "close_short":
+            expect_long_delta_1 = float(predict_value_row["TradeRate_NF_Long_Delta1"])
+            expect_long_delta_2 = float(predict_value_row["TradeRate_NF_Long_Delta2"])
+            expect_long_delta_3 = float(predict_value_row["TradeRate_NF_Long_Delta3"])
+            state = {
+                "delta1": np.array([expect_long_delta_1]),
+                "delta2": np.array([expect_long_delta_2]),
+                "delta3": np.array([expect_long_delta_3]),
+            }
+        else:
+            raise ValueError(f"Invalid env type: {self._env_type}")
+
+        return state
 
     def _get_price_info(
         self,
@@ -282,29 +312,49 @@ class SplitStateActionEnv(gym.Env):
     def render(self):
         pass
 
-    @classmethod
+    @staticmethod
     def get_start_index_list(
-        cls, file_path: str, fw_value_index: int, index_state_dict: dict[int, float]
-    ):
+        file_path: str, env_type: str, state_table: list[tuple[float, float]]
+    ) -> list:
+
+        def region_check(element, left_value, right_value) -> bool:
+            if left_value == right_value == element == 0:
+                return True
+
+            if element > left_value and element <= right_value:
+                return True
+
+            return False
+
         start_index_list = []
         loaded_data = load_dataframe(file_path)
-        for index, value in enumerate(loaded_data["Pred"].values):
-            if fw_value_index == 22 and index <= len(loaded_data) - 10:
-                if index_state_dict[21] > value:
-                    start_index_list.append(index)
-            elif fw_value_index == 1 and index <= len(loaded_data) - 10:
-                if index_state_dict[1] < value:
-                    start_index_list.append(index)
-            else:
-                if (
-                    fw_value_index not in [1, 22]
-                    and index_state_dict[fw_value_index] <= value
-                    and index_state_dict[fw_value_index - 1] > value
-                    and index <= len(loaded_data) - 10
-                ):
-                    start_index_list.append(index)
-        if len(start_index_list) >= 100:
-            random_start_index_list = random.sample(start_index_list, 100)
-            return random_start_index_list
-        else:
-            return start_index_list
+        for index in range(len(loaded_data) - 100):
+            row_data = loaded_data.iloc[index]
+            if env_type == "open_long":
+                first_elememt = row_data["TradeRate_NF_Long_Delta1"]
+                second_elememt = row_data["TradeRate_NF_Long_Delta2"]
+                third_elememt = row_data["TradeRate_NF_Long_Delta3"]
+
+            if env_type == "open_short":
+                first_elememt = row_data["TradeRate_NF_Short_Delta1"]
+                second_elememt = row_data["TradeRate_NF_Short_Delta2"]
+                third_elememt = row_data["TradeRate_NF_Short_Delta3"]
+
+            if env_type == "close_long":
+                first_elememt = row_data["TradeRate_NF_Short_Delta1"]
+                second_elememt = row_data["TradeRate_NF_Short_Delta2"]
+                third_elememt = row_data["TradeRate_NF_Short_Delta3"]
+
+            if env_type == "close_short":
+                first_elememt = row_data["TradeRate_NF_Long_Delta1"]
+                second_elememt = row_data["TradeRate_NF_Long_Delta2"]
+                third_elememt = row_data["TradeRate_NF_Long_Delta3"]
+
+            if (
+                region_check(first_elememt, state_table[0][0], state_table[0][1])
+                and region_check(second_elememt, state_table[0][1], state_table[0][2])
+                and region_check(third_elememt, state_table[0][2], state_table[0][3])
+            ):
+                start_index_list.append(index)
+
+        return start_index_list
