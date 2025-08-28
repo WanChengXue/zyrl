@@ -9,7 +9,7 @@ import time
 import pandas as pd
 from tqdm import tqdm
 import numpy as np
-
+import matplotlib.pyplot as plt
 import ray
 
 
@@ -34,6 +34,7 @@ class MCFromStart:
         self._gamma = mc_config.get("gamma", 0.99)
         self._q_table = init_q_table
         self._env_class = env_class
+        self._mse_loss_list = []
         self._init_count_table()
         self._saved_q_table()
 
@@ -50,6 +51,9 @@ class MCFromStart:
             self._collect_data()
             end_flag = self._end_check(before_update_q_table, self._q_table)
             self._saved_q_table()
+            plt.plot(self._mse_loss_list)
+            plt.savefig(self._mc_config.get("mse_loss_plot_path"))
+            plt.close()
 
     def _saved_q_table(self):
         self._q_table.to_csv(self._saved_q_table_path)
@@ -57,6 +61,7 @@ class MCFromStart:
 
     def _end_check(self, current_state: pd.DataFrame, next_state: pd.DataFrame) -> bool:
         mse_error = np.mean((current_state.values - next_state.values) ** 2)
+        self._mse_loss_list.append(mse_error)
         if mse_error < 1e-6:
             return True
         return False
@@ -144,7 +149,7 @@ class RayNode:
         self._return_container.clear()
         done = False
         current_state, info = self._env.reset(
-            {"init_state_index": self._init_state_index}
+            options={"init_state_index": self._init_state_index}
         )
         while True:
             state_index = self._env.get_state_index(current_state)
