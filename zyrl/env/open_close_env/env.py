@@ -26,8 +26,24 @@ class SplitStateActionEnv(gym.Env):
         self._data_path = config["data_path"]
         # open_long, close_long, open_short, close_short
         self._env_type = config["env_type"]
+        self._holding = 0
+        if self._env_type in ["open_long", "open_short"]:
+            self._holding = 0
+        elif self._env_type == "close_long":
+            self._holding = 1
+        else:
+            self._holding = -1
+
+        self._start_index = 0
+        self._current_file = None
+        self._training_data = None
+        self._current_index = 0
+        self._total_index = 0
+        self._index_state_dict = None
+        self._state_index_mapping = None
+
         self._trading_config = {
-            "current_holding": config.get("init_holding", 0),
+            "current_holding": self._holding,
             "commission_value": config.get("commission_value", 0.12),
             "util_termination": config.get("util_termination", False),
         }
@@ -43,20 +59,8 @@ class SplitStateActionEnv(gym.Env):
         self._reward_function = MultiActionShortLongReward(
             self._trading_config["commission_value"]
         )
-        self._holding = 0
-        self._start_index = 0
-        self._current_file = None
-        self._training_data = None
-        self._current_index = 0
-        self._total_index = 0
-        self._state_table = None
-        self._index_state_dict = None
-        self._state_index_mapping = None
 
     def _load_state_index(self):
-        self._state_table = np.load(
-            self._config["state_table_path"], allow_pickle=True
-        ).item()
         self._index_state_dict = np.load(
             self._config["index_state_dict_path"], allow_pickle=True
         ).item()
@@ -175,16 +179,13 @@ class SplitStateActionEnv(gym.Env):
         if init_state_index is None:
             start_index = 0
         else:
-            fw_value_index, current_holding = self._state_index_mapping[
-                "index_to_state"
-            ][init_state_index]
+            prob_region = self._index_state_dict[init_state_index]
             start_index_list = self.get_start_index_list(
                 os.path.join(self._data_path, file_name),
-                fw_value_index,
-                self._index_state_dict,
+                self._env_type,
+                prob_region,
             )
             start_index = random.choice(start_index_list)
-            self._trading_config["current_holding"] = current_holding
         return file_name, start_index
 
     def reset(
@@ -202,18 +203,11 @@ class SplitStateActionEnv(gym.Env):
         self._training_data = self._load_data(self._data_path, file_name)
         self._current_index = start_index
         self._total_index = len(self._training_data)
-        state, predict_value_index = self._get_current_state_data(self._current_index)
+        state = self._get_current_state_data(self._current_index)
         info = {
             "current_holding": self._trading_config["current_holding"],
             "current_index": self._current_index,
-            "predict_value_index": predict_value_index,
         }
-        info.update(
-            {
-                "state_table": self._state_table,
-                "percentile_dict": self._percentile_dict,
-            }
-        )
         return state, info
 
     def step(
@@ -236,12 +230,11 @@ class SplitStateActionEnv(gym.Env):
         done = self._done(next_holding, self._trading_config["util_termination"])
         self._trading_config["current_holding"] = next_holding
         self._current_index += 1
-        state, predict_value = self._get_current_state_data(self._current_index)
+        state = self._get_current_state_data(self._current_index)
         info = {
             "current_ts_str": self._training_data.iloc[self._current_index].name,
             "current_index": self._current_index,
             "current_holding": self._trading_config["current_holding"],
-            "predict_value": predict_value,
         }
         info.update(price_info)
         return state, reward, done, False, info
@@ -253,10 +246,15 @@ class SplitStateActionEnv(gym.Env):
         else:
             if self._current_index >= len(self._training_data) - 5:
                 return True
-            if next_holding == 0:
+            if self._env_type in ["open_long", "open_short"] and next_holding != 0:
+                return True
+            if self._env_type in ["close_long", "close_short"] and next_holding == 0:
                 return True
             else:
                 return False
+
+    def _rollout_reward(self):
+        pass
 
     def _convert_action_to_action_op(
         self, action: np.ndarray | int, current_holding: int, trading_data: pd.Series
@@ -264,57 +262,75 @@ class SplitStateActionEnv(gym.Env):
         if action == 0:
             return "Keep", 0
 
+        action_map = {1: 0, 2: 1, 3: 2}
         # Define action mappings
-        long_actions = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}
-        short_actions = {7: 0, 8: 1, 9: 2, 10: 3, 11: 4, 12: 5}
-
-        if action in long_actions:
-            trading_prob = trading_data[f"TradeRate_Long_Delta{long_actions[action]}"]
+        if self._env_type in ["open_long", "close_short"]:
+            trading_prob = trading_data[
+                "TradeRate_Long_Delta" + str(action_map[action])
+            ]
             random_value = random.random()
             if random_value <= trading_prob:
                 return (
-                    ("OpenLong", long_actions[action])
+                    ("OpenLong", action_map[action])
                     if current_holding == 0
-                    else ("CloseShort", long_actions[action])
+                    else ("CloseShort", action_map[action])
                 )
             return ("Keep", 0)
 
-        if action in short_actions:
-            trading_prob = trading_data[f"TradeRate_Short_Delta{short_actions[action]}"]
+        if self._env_type in ["open_short", "close_long"]:
+            trading_prob = trading_data[
+                "TradeRate_Short_Delta" + str(action_map[action])
+            ]
             random_value = random.random()
             if random_value <= trading_prob:
                 return (
-                    ("OpenShort", short_actions[action])
+                    ("OpenShort", action_map[action])
                     if current_holding == 0
-                    else ("CloseLong", short_actions[action])
+                    else ("CloseLong", action_map[action])
                 )
             return ("Keep", 0)
 
         raise ValueError(f"Invalid action: {action}")
 
     def get_index_state_dict(self) -> dict[int, float]:
-        return self._state_table
+        return self._index_state_dict
 
-    def get_percentile_dict(self) -> dict[str, float]:
-        return self._percentile_dict
+    def _get_state_table_index(self, probs: tuple[float, float, float]) -> int:
+        def get_prob_region(prob: float) -> tuple[float, float]:
+            if prob == 0:
+                return (0, 0)
+            elif prob <= 0.2:
+                return (0, 0.2)
+            elif prob <= 0.4:
+                return (0.2, 0.4)
+            elif prob <= 0.6:
+                return (0.4, 0.6)
+            elif prob <= 0.8:
+                return (0.6, 0.8)
+            else:
+                return (0.8, 1)
 
-    def _get_state_table_index(self, predict_value: float) -> int:
-        for key in sorted(self._state_table.keys(), reverse=True):
-            if predict_value >= key:
-                return self._state_table[key]
-        return len(self._state_table) + 1
+        first_prob, second_prob, third_prob = probs
+        first_region = get_prob_region(first_prob)
+        second_region = get_prob_region(second_prob)
+        third_region = get_prob_region(third_prob)
+        return self._state_index_mapping[(first_region, second_region, third_region)]
 
     def get_state_index(self, state: dict[str, np.ndarray]) -> int:
-        state_index = self._get_state_table_index(state["forward_value"].item())
-        holding = state["holding"].item()
-        return self._state_index_mapping["state_to_index"][(state_index, holding)]
+        prob_region = (
+            state["delta1"].item(),
+            state["delta2"].item(),
+            state["delta3"].item(),
+        )
+        state_index = self._get_state_table_index(prob_region)
+        return state_index
 
     def render(self):
         pass
 
     @staticmethod
     def get_start_index_list(
-        file_path: str, env_type: str, state_table: list[tuple[float, float]]
+        file_path: str, env_type: str, state_table: tuple[tuple[float, float]]
     ) -> list:
 
         def region_check(element, left_value, right_value) -> bool:
@@ -352,8 +368,8 @@ class SplitStateActionEnv(gym.Env):
 
             if (
                 region_check(first_elememt, state_table[0][0], state_table[0][1])
-                and region_check(second_elememt, state_table[0][1], state_table[0][2])
-                and region_check(third_elememt, state_table[0][2], state_table[0][3])
+                and region_check(second_elememt, state_table[1][0], state_table[1][1])
+                and region_check(third_elememt, state_table[2][0], state_table[2][1])
             ):
                 start_index_list.append(index)
 
