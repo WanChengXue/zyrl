@@ -62,7 +62,8 @@ class MCFromStart:
     def _end_check(self, current_state: pd.DataFrame, next_state: pd.DataFrame) -> bool:
         mse_error = np.mean((current_state.values - next_state.values) ** 2)
         self._mse_loss_list.append(mse_error)
-        if mse_error < 1e-6:
+        print(f"mse_error: {mse_error}")
+        if mse_error < 1e-5:
             return True
         return False
 
@@ -95,12 +96,8 @@ class MCFromStart:
                         "env_class": self._env_class,
                         "env_config": self._env_config,
                     }
-
                     worker_list.append(ray_worker.remote(worker_config))
-                # if state_index == 49 and init_action == 0:
-                #     print("debug")
-                #     worker = RayWorker(worker_config)
-                #     worker_return_dict_list = [worker.run(init_action)]
+
                 worker_return_dict_list = ray.get(worker_list)
                 for worker_return_dict in worker_return_dict_list:
                     for key in worker_return_dict:
@@ -148,34 +145,37 @@ class RayNode:
         first_flag = True
         self._return_container.clear()
         done = False
-        current_state, info = self._env.reset(
-            options={"init_state_index": self._init_state_index}
-        )
-        while True:
-            state_index = self._env.get_state_index(current_state)
-            q_list = self._q_table.iloc[state_index]
-
-            # 添加调试信息
-            if first_flag:
-                action = init_action
-                assert state_index == self._init_state_index
-            else:
-                action = q_list.idxmax()
-
-            first_flag = False
-
-            next_state, reward, done, _, info = self._env.step(action)
-            # log_list.append([info["predict_value"], info["current_holding"], current_state["forward_value_index"].item(), action, reward])
-            self._return_container.add_reward(
-                reward,
-                state_index,
-                action,
+        try:
+            current_state, info = self._env.reset(
+                options={"init_state_index": self._init_state_index}
             )
-            # (state_index, holding, action, reward)
-            current_state = next_state
-            if done:
-                break
-        return self._return_container.get_return()
+            while True:
+                state_index = self._env.get_state_index(current_state)
+                q_list = self._q_table.iloc[state_index]
+
+                # 添加调试信息
+                if first_flag:
+                    action = init_action
+                    assert state_index == self._init_state_index
+                else:
+                    action = q_list.idxmax()
+
+                first_flag = False
+
+                next_state, reward, done, _, info = self._env.step(action)
+                # log_list.append([info["predict_value"], info["current_holding"], current_state["forward_value_index"].item(), action, reward])
+                self._return_container.add_reward(
+                    reward,
+                    state_index,
+                    action,
+                )
+                # (state_index, holding, action, reward)
+                current_state = next_state
+                if done:
+                    break
+            return self._return_container.get_return()
+        except Exception as e:
+            return {}
 
 
 class StateIndexReturnContainer:

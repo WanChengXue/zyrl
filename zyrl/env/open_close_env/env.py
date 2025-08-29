@@ -24,6 +24,7 @@ class SplitStateActionEnv(gym.Env):
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
         self._data_path = config["data_path"]
+        self._start_index_path = config["start_index_path"]
         # open_long, close_long, open_short, close_short
         self._env_type = config["env_type"]
         self._holding = 0
@@ -179,12 +180,21 @@ class SplitStateActionEnv(gym.Env):
         if init_state_index is None:
             start_index = 0
         else:
-            prob_region = self._index_state_dict[init_state_index]
-            start_index_list = self.get_start_index_list(
-                os.path.join(self._data_path, file_name),
-                self._env_type,
-                prob_region,
-            )
+            if self._env_type in ["open_long", "close_short"]:
+                start_file_dict = np.load(
+                    f"{self._start_index_path}/{file_name}_long_dict.npy",
+                    allow_pickle=True,
+                ).item()
+            else:
+                start_file_dict = np.load(
+                    f"{self._start_index_path}/{file_name}_short_dict.npy",
+                    allow_pickle=True,
+                ).item()
+            start_index_list = start_file_dict[init_state_index]
+            if len(start_index_list) == 0:
+                raise ValueError(
+                    f"No start index found for file {file_name} and state {init_state_index}"
+                )
             start_index = random.choice(start_index_list)
         return file_name, start_index
 
@@ -237,7 +247,22 @@ class SplitStateActionEnv(gym.Env):
             "current_holding": self._trading_config["current_holding"],
         }
         info.update(price_info)
+        if (
+            self._env_type in ["open_long", "open_short"]
+            and not self._trading_config["util_termination"]
+        ):
+            rollout_reward = self._rollout_reward(state)
+            reward += rollout_reward
         return state, reward, done, False, info
+
+    def _set_long_table(self):
+        self._long_table = pd.read_csv(self._config["long_table_path"])
+
+    def _set_short_table(self):
+        self._short_table = pd.read_csv(self._config["short_table_path"])
+
+    def set_env_type(self, env_type: str) -> None:
+        self._env_type = env_type
 
     def _done(self, next_holding: int, util_termination: bool = False) -> bool:
         if util_termination:
@@ -253,8 +278,41 @@ class SplitStateActionEnv(gym.Env):
             else:
                 return False
 
-    def _rollout_reward(self):
-        pass
+    def _rollout_reward(self, state: dict[str, np.ndarray]) -> float:
+        # 如果是open_long/open_short，则需要计算rollout奖励
+        assert self._env_type in ["open_long", "open_short"]
+        switch_env_type = (
+            "close_long" if self._env_type == "open_long" else "close_short"
+        )
+        self.set_env_type(switch_env_type)
+        rollout_done = False
+        rollout_reward = 0
+        while not rollout_done:
+            state_index = self.get_state_index(state)
+            action_list = self._long_table.iloc[state_index]
+            action = action_list.idxmax()
+            action_op, action_index = self._convert_action_to_action_op(
+                action,
+                self._trading_config["current_holding"],
+                self._training_data.iloc[self._current_index],
+            )
+            price_info = self._get_price_info(
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
+                action_op,
+                action_index,
+            )
+            reward, next_holding = self._reward_function(
+                price_info, action_op, self._trading_config["current_holding"]
+            )
+            rollout_reward += reward
+            rollout_done = self._done(
+                next_holding, self._trading_config["util_termination"]
+            )
+            self._trading_config["current_holding"] = next_holding
+            self._current_index += 1
+            state = self._get_current_state_data(self._current_index)
+        return rollout_reward
 
     def _convert_action_to_action_op(
         self, action: np.ndarray | int, current_holding: int, trading_data: pd.Series
