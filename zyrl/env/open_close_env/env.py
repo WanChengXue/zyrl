@@ -284,6 +284,10 @@ class SplitStateActionEnv(gym.Env):
         switch_env_type = (
             "close_long" if self._env_type == "open_long" else "close_short"
         )
+        if switch_env_type == "close_long":
+            self._set_long_table()
+        else:
+            self._set_short_table()
         self.set_env_type(switch_env_type)
         rollout_done = False
         rollout_reward = 0

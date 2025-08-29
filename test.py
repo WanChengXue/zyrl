@@ -81,8 +81,8 @@ def init_open_short_q_table():
 
 
 def test_mc():
-    env_type = "close_short"
-    q_table = init_close_short_q_table()
+    env_type = "open_long"
+    q_table = init_open_long_q_table()
     config = {
         "data_path": "./data/split_state_action_data",
         "env_type": env_type,
@@ -90,6 +90,8 @@ def test_mc():
         "index_state_dict_path": "./data/split_state_action_data_index/index_state_dict.npy",
         "state_index_mapping_path": "./data/split_state_action_data_index/state_index_mapping.npy",
         "start_index_path": "./data/split_state_action_data_index",
+        "long_table_path": "./data/split_state_action_data_index/q_table_close_long.csv",
+        "short_table_path": "./data/split_state_action_data_index/q_table_close_short.csv",
     }
 
     mc_config = {

@@ -96,6 +96,9 @@ class MCFromStart:
                         "env_class": self._env_class,
                         "env_config": self._env_config,
                     }
+                    worker = RayWorker(worker_config)
+                    worker_return_dict = worker.run(init_action)
+                    return_dict[state_index, init_action] = worker_return_dict
                     worker_list.append(ray_worker.remote(worker_config))
 
                 worker_return_dict_list = ray.get(worker_list)
