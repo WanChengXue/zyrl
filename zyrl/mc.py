@@ -29,6 +29,7 @@ class MCFromStart:
     ):
         self._saved_q_table_path = mc_config.get("saved_q_table_path")
         self._saved_count_table_path = mc_config.get("saved_count_table_path")
+        self._mask_table = mc_config.get("mask_table", None)
         self._mc_config = mc_config
         self._env_config = env_config
         self._gamma = mc_config.get("gamma", 0.99)
@@ -63,7 +64,7 @@ class MCFromStart:
         mse_error = np.mean((current_state.values - next_state.values) ** 2)
         self._mse_loss_list.append(mse_error)
         print(f"mse_error: {mse_error}")
-        if mse_error < 1e-5:
+        if mse_error < 5e-5:
             return True
         return False
 
@@ -86,6 +87,9 @@ class MCFromStart:
         self._sample_env_num = self._mc_config.get("sample_env_num", 10)
         for state_index in tqdm(self._q_table.index):
             for init_action in self._q_table.columns:
+                if self._mask_table is not None:
+                    if not self._mask_table.iloc[state_index, init_action]:
+                        continue
                 worker_list = []
                 for _ in range(self._sample_env_num):
                     worker_config = {
@@ -96,9 +100,9 @@ class MCFromStart:
                         "env_class": self._env_class,
                         "env_config": self._env_config,
                     }
-                    worker = RayWorker(worker_config)
-                    worker_return_dict = worker.run(init_action)
-                    return_dict[state_index, init_action] = worker_return_dict
+                    # worker = RayWorker(worker_config)
+                    # worker_return_dict = worker.run(init_action)
+                    # return_dict[state_index, init_action] = worker_return_dict
                     worker_list.append(ray_worker.remote(worker_config))
 
                 worker_return_dict_list = ray.get(worker_list)

@@ -88,7 +88,15 @@ def jump_trade_period(last_ts: str, current_ts: str) -> bool:
 
 
 if __name__ == "__main__":
+    import os
+
+    table_path = (
+        "/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/20250801-20250903.feather"
+    )
+    saved_path = "/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/delta3/im_20250917_old"
+    if not os.path.exists(saved_path):
+        os.makedirs(saved_path)
     split_table(
-        table_path="/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/split_state_tradeRateTable.feather",
-        saved_path="/home/zydl-dev-cl/Desktop/rl_finance/zyrl/data/split_state_action_data",
+        table_path=table_path,
+        saved_path=saved_path,
     )
