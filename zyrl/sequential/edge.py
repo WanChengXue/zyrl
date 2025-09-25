@@ -52,6 +52,7 @@ class TaskLink:
 
     def construct_task(self, task_list: list[Task]):
         main_task = task_list[0]
+        self._task_status_check(task_list)
         compound_task = Task(
             MergedEnv,
             task_name=main_task.get_task_name(),
@@ -60,3 +61,13 @@ class TaskLink:
             mc_config=main_task.get_mc_config(),
         )
         return compound_task
+
+    def _task_status_check(self, task_list: list[Task]):
+        main_task = task_list[0]
+        rollout_task_list = task_list[1:]
+        assert (
+            main_task.get_status() == "untrained"
+        ), f"Main task {main_task.get_task_name()} is not untrained"
+        assert all(
+            task.get_status() == "trained" for task in rollout_task_list
+        ), f"Rollout task {rollout_task_list} is not trained"

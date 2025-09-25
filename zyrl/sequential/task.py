@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from zyrl.utils.table_utils import load_dataframe
 from zyrl.mc import MCFromStart
 
 
@@ -40,6 +41,27 @@ class Task:
             self._env_cls, self._init_q_table, self._env_config, self._mc_config
         )
         mc.run()
+
+    def load_checkpoint(self, checkpoint_folder: str):
+        q_table_path = f"{checkpoint_folder}/{self._task_name}/q_table.csv"
+        self._q_table = pd.read_csv(q_table_path, index_col=0)
+        self._status = "trained"
+
+    def evaluate(self, test_folder_path: str):
+        file_list = os.listdir(test_folder_path)
+        act_env = self._env_cls(self._env_config)
+        result_dict = {}
+        for file_name in file_list:
+            test_file = os.path.join(test_folder_path, file_name)
+            data = load_dataframe(test_file)
+            action_list = []
+            for index, row in data.iterrows():
+                state_index = act_env.get_state_index(row)
+                q_list = self._q_table.iloc[state_index]
+                action = q_list.idxmax()
+                action_list.append(action)
+            result_dict[file_name] = action_list
+        return result_dict
 
     def get_env(self):
         return self._env_cls(self._env_config)

@@ -274,6 +274,53 @@ def test_sequential(file_path_dict, rank, pred_using):
     controller.train()
 
 
+def test_sequential_evaluate(file_path_dict, rank, pred_using, test_folder_path):
+    result_folder_name = file_path_dict["result_folder"]
+    close_long_config, close_long_mc_config, _ = get_config(
+        "close_long", file_path_dict, rank, pred_using
+    )
+    open_long_config, open_long_mc_config, _ = get_config(
+        "open_long", file_path_dict, rank, pred_using
+    )
+    close_short_config, close_short_mc_config, _ = get_config(
+        "close_short", file_path_dict, rank, pred_using
+    )
+    open_short_config, open_short_mc_config, _ = get_config(
+        "open_short", file_path_dict, rank, pred_using
+    )
+    close_long_task = Task(
+        SplitStateActionEnv,
+        "close_long",
+        close_long_config,
+    )
+    open_long_task = Task(
+        SplitStateActionEnv,
+        "open_long",
+        open_long_config,
+    )
+    close_short_task = Task(
+        SplitStateActionEnv,
+        "close_short",
+        close_short_config,
+    )
+    open_short_task = Task(
+        SplitStateActionEnv,
+        "open_short",
+        open_short_config,
+    )
+    open_long_close_long_link = TaskLink([open_long_task, close_long_task])
+    close_short_open_short_link = TaskLink([close_short_task, open_short_task])
+    checkpoint_folder = f"./data/{result_folder_name}/sequential"
+    controller = Controller(
+        task_list=[close_long_task, open_long_task, close_short_task, open_short_task],
+        link_list=[open_long_close_long_link, close_short_open_short_link],
+        checkpoint_folder=checkpoint_folder,
+    )
+    test_folder_path = f"./data/{result_folder_name}"
+    saved_folder_path = f"./data/{result_folder_name}_test_result"
+    controller.evaluate(checkpoint_folder, test_folder_path, saved_folder_path)
+
+
 def compare_figure(q_path, bechmark_path, data_folder):
     import numpy as np
 
@@ -307,7 +354,10 @@ if __name__ == "__main__":
         "index_folder": args.index_folder,
         "result_folder": args.result_folder,
     }
-    test_sequential(file_path_dict, args.rank, args.pred_using)
+    # test_sequential(file_path_dict, args.rank, args.pred_using)
+    test_sequential_evaluate(
+        file_path_dict, args.rank, args.pred_using, args.result_folder
+    )
     # test_mc(env_type, file_path_dict, args.rank, args.pred_using)
     # compare_figure(
     #     f"./data/{args.data_folder}_test_result/q_reward_list.npy",
