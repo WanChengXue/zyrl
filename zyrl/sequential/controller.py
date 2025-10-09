@@ -1,5 +1,6 @@
 import os
 import time
+import pandas as pd
 from zyrl.sequential.task import Task
 from zyrl.sequential.edge import TaskLink
 from zyrl.utils.table_utils import load_dataframe
@@ -48,10 +49,16 @@ class Controller:
     def save_result(
         self, test_folder_path: str, result_dict: dict, saved_folder_path: str
     ):
+        data_list = []
         for file_name in sorted(os.listdir(test_folder_path)):
             test_file = os.path.join(test_folder_path, file_name)
             data = load_dataframe(test_file)
             for task_name, action_dict in result_dict.items():
                 action_list = action_dict[file_name]
                 data[task_name] = action_list
-            data.to_csv(os.path.join(saved_folder_path, file_name), index=False)
+                data.to_csv(os.path.join(saved_folder_path, file_name), index=False)
+            data_list.append(data)
+        concat_data = pd.concat(data_list, axis=0)
+        concat_data.to_csv(
+            os.path.join(saved_folder_path, "concat_data.csv"), index=False
+        )

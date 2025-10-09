@@ -144,8 +144,9 @@ class SplitStateActionEnv(gym.Env):
 
         raise FileNotFoundError(f"数据文件不存在: {data_path}")
 
-    def _get_current_state_data(self, index: int) -> dict[str, np.ndarray]:
-        predict_value_row = self._training_data.iloc[index]
+    def _get_current_state_data(
+        self, predict_value_row: pd.Series
+    ) -> dict[str, np.ndarray]:
         if self._env_type == "open_long":
             expect_long_delta_1 = float(predict_value_row["TradeRate_NF_Long_Delta1"])
             expect_long_delta_2 = float(predict_value_row["TradeRate_NF_Long_Delta2"])
@@ -377,7 +378,9 @@ class SplitStateActionEnv(gym.Env):
         self._training_data = self._load_data(self._data_path, file_name)
         self._current_index = start_index
         self._total_index = len(self._training_data)
-        state = self._get_current_state_data(self._current_index)
+        state = self._get_current_state_data(
+            self._training_data.iloc[self._current_index]
+        )
         info = {
             "current_holding": self._trading_config["current_holding"],
             "current_index": self._current_index,
@@ -405,7 +408,9 @@ class SplitStateActionEnv(gym.Env):
         done = self._done(next_holding, self._trading_config["util_termination"])
         self._trading_config["current_holding"] = next_holding
         self._current_index += 1
-        state = self._get_current_state_data(self._current_index)
+        state = self._get_current_state_data(
+            self._training_data.iloc[self._current_index]
+        )
         info = {
             "file_name": self._file_name,
             "current_ts_str": self._training_data.iloc[self._current_index].name,
@@ -486,7 +491,9 @@ class SplitStateActionEnv(gym.Env):
             )
             self._trading_config["current_holding"] = next_holding
             self._current_index += 1
-            state = self._get_current_state_data(self._current_index)
+            state = self._get_current_state_data(
+                self._training_data.iloc[self._current_index]
+            )
         return rollout_reward
 
     def _convert_action_to_action_op(
@@ -629,6 +636,10 @@ class SplitStateActionEnv(gym.Env):
                         fifth_region,
                     )
                 ]
+
+    def get_state_index_from_raw_data(self, raw_data: pd.Series) -> int:
+        state = self._get_current_state_data(raw_data)
+        return self.get_state_index(state)
 
     def get_state_index(self, state: dict[str, np.ndarray]) -> int:
         if self._rank == 3:

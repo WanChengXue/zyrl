@@ -274,7 +274,9 @@ def test_sequential(file_path_dict, rank, pred_using):
     controller.train()
 
 
-def test_sequential_evaluate(file_path_dict, rank, pred_using, test_folder_path):
+def test_sequential_evaluate(
+    file_path_dict, rank, pred_using, test_folder_path, result_saved_folder_path
+):
     result_folder_name = file_path_dict["result_folder"]
     close_long_config, close_long_mc_config, _ = get_config(
         "close_long", file_path_dict, rank, pred_using
@@ -316,9 +318,7 @@ def test_sequential_evaluate(file_path_dict, rank, pred_using, test_folder_path)
         link_list=[open_long_close_long_link, close_short_open_short_link],
         checkpoint_folder=checkpoint_folder,
     )
-    test_folder_path = f"./data/{result_folder_name}"
-    saved_folder_path = f"./data/{result_folder_name}_test_result"
-    controller.evaluate(checkpoint_folder, test_folder_path, saved_folder_path)
+    controller.evaluate(checkpoint_folder, test_folder_path, result_saved_folder_path)
 
 
 def compare_figure(q_path, bechmark_path, data_folder):
@@ -348,6 +348,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--rank", type=int, default=4)
     parser.add_argument("--pred_using", type=bool, default=False)
+    parser.add_argument(
+        "--test_folder_path", type=str, default="delta4/im_20250916_test"
+    )
+    parser.add_argument(
+        "--result_saved_folder_path", type=str, default="delta4/im_20250916_test_result"
+    )
     args = parser.parse_args()
     file_path_dict = {
         "data_folder": args.data_folder,
@@ -355,8 +361,14 @@ if __name__ == "__main__":
         "result_folder": args.result_folder,
     }
     # test_sequential(file_path_dict, args.rank, args.pred_using)
+    test_folder_path = f"./data/{args.test_folder_path}"
+    result_saved_folder_path = f"./data/{args.result_saved_folder_path}"
     test_sequential_evaluate(
-        file_path_dict, args.rank, args.pred_using, args.result_folder
+        file_path_dict,
+        args.rank,
+        args.pred_using,
+        test_folder_path,
+        result_saved_folder_path,
     )
     # test_mc(env_type, file_path_dict, args.rank, args.pred_using)
     # compare_figure(

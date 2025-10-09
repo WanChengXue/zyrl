@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from zyrl.utils.table_utils import load_dataframe
 from zyrl.mc import MCFromStart
+from tqdm import tqdm
 
 
 class Task:
@@ -51,14 +52,16 @@ class Task:
         file_list = os.listdir(test_folder_path)
         act_env = self._env_cls(self._env_config)
         result_dict = {}
-        for file_name in file_list:
+        for file_name in tqdm(sorted(file_list)):
             test_file = os.path.join(test_folder_path, file_name)
             data = load_dataframe(test_file)
             action_list = []
             for index, row in data.iterrows():
-                state_index = act_env.get_state_index(row)
+                state_index = act_env.get_state_index_from_raw_data(row)
                 q_list = self._q_table.iloc[state_index]
-                action = q_list.idxmax()
+                if "state_index" in q_list.index:
+                    q_list = q_list.drop("state_index")
+                action = int(q_list.idxmax())
                 action_list.append(action)
             result_dict[file_name] = action_list
         return result_dict
