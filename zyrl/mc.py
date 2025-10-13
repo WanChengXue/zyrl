@@ -118,8 +118,7 @@ class MCFromStart:
 @ray.remote
 def ray_worker(config):
     worker = RayWorker(config)
-    init_action = config.get("init_action")
-    return_dict = worker.run(init_action)
+    return_dict = worker.run()
     return return_dict
 
 
@@ -128,10 +127,11 @@ class RayWorker:
         self._config = config
         self._return_dict = {}
         self._env_class = config.get("env_class")
+        self._init_action = config.get("init_action")
 
-    def run(self, init_action: int):
+    def run(self):
         start_option = {
-            "init_action": init_action,
+            "init_action": self._init_action,
         }
         worker_node = RayNode(self._config, self._env_class)
         ray_node_return = worker_node.run(start_option)

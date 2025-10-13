@@ -45,9 +45,10 @@ class BacktestWorker:
     def __init__(self, config: dict):
         self._config = config
         self._use_benchmark = config.get("use_benchmark", False)
-        if self._use_benchmark:
+        if not self._use_benchmark:
             self._load_q_table()
         self._init_env()
+        self._commission_value = self._config["env_config"]["commission_value"]
 
     def _load_q_table(self):
         self._q_table = {}
@@ -129,14 +130,14 @@ class BacktestWorker:
                         -info["price_info"]["long"]["current_LP"]
                         + info["price_info"]["short"]["current_SP"]
                     )
-                    clean_return = gross_return - 0.125 * 2
+                    clean_return = gross_return - self._commission_value * 2
                     detailed_table.loc[op_index] = [
                         ts,
                         new_holding,
                         action_op,
                         diff_reward.item(),
                         gross_return.item(),
-                        0.15,
+                        self._commission_value,
                         clean_return.item(),
                     ]
                     op_index += 1
@@ -168,14 +169,14 @@ class BacktestWorker:
                         if action_op == "open_short":
                             gross_return = info["price_info"]["short"]["current_SP"]
 
-                clean_return = gross_return - 0.125
+                clean_return = gross_return - self._commission_value
                 detailed_table.loc[op_index] = [
                     ts,
                     holding,
                     action_op,
                     diff_reward.item(),
                     gross_return.item(),
-                    0.15,
+                    self._commission_value,
                     clean_return.item(),
                 ]
                 op_index += 1

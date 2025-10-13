@@ -208,8 +208,8 @@ def get_config(env_type, file_path_dict, rank, pred_using):
         "index_state_dict_path": f"./data/{index_folder_name}/index_state_dict.npy",
         "state_index_mapping_path": f"./data/{index_folder_name}/state_index_mapping.npy",
         "start_index_path": f"./data/{result_folder_name}",
-        "long_table_path": f"./data/{result_folder_name}/q_table_close_long.csv",
-        "short_table_path": f"./data/{result_folder_name}/q_table_close_short.csv",
+        "long_table_path": f"./data/{result_folder_name}/sequential/close_long/q_table.csv",
+        "short_table_path": f"./data/{result_folder_name}/sequential/close_short/q_table.csv",
         "rank": rank,
         "pred_using": pred_using,
     }
@@ -311,7 +311,7 @@ def test_sequential_evaluate(
         open_short_config,
     )
     open_long_close_long_link = TaskLink([open_long_task, close_long_task])
-    close_short_open_short_link = TaskLink([close_short_task, open_short_task])
+    close_short_open_short_link = TaskLink([open_short_task, close_short_task])
     checkpoint_folder = f"./data/{result_folder_name}/sequential"
     controller = Controller(
         task_list=[close_long_task, open_long_task, close_short_task, open_short_task],
@@ -360,16 +360,16 @@ if __name__ == "__main__":
         "index_folder": args.index_folder,
         "result_folder": args.result_folder,
     }
-    # test_sequential(file_path_dict, args.rank, args.pred_using)
-    test_folder_path = f"./data/{args.test_folder_path}"
-    result_saved_folder_path = f"./data/{args.result_saved_folder_path}"
-    test_sequential_evaluate(
-        file_path_dict,
-        args.rank,
-        args.pred_using,
-        test_folder_path,
-        result_saved_folder_path,
-    )
+    test_sequential(file_path_dict, args.rank, args.pred_using)
+    # test_folder_path = f"./data/{args.test_folder_path}"
+    # result_saved_folder_path = f"./data/{args.result_saved_folder_path}"
+    # test_sequential_evaluate(
+    #     file_path_dict,
+    #     args.rank,
+    #     args.pred_using,
+    #     test_folder_path,
+    #     result_saved_folder_path,
+    # )
     # test_mc(env_type, file_path_dict, args.rank, args.pred_using)
     # compare_figure(
     #     f"./data/{args.data_folder}_test_result/q_reward_list.npy",

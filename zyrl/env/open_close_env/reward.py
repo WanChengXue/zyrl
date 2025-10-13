@@ -149,4 +149,6 @@ class MultiActionShortLongReward:
             return np.array([0.0]), 0
         if current_holding == -1:
             return self.keep_short_reward(price_info), -1
-        return self.keep_long_reward(price_info), 1
+        if current_holding == 1:
+            return self.keep_long_reward(price_info), 1
+        raise ValueError(f"Invalid current holding: {current_holding}")

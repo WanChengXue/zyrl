@@ -131,9 +131,7 @@ class SplitStateActionEnv(gym.Env):
             self._config["state_index_mapping_path"], allow_pickle=True
         ).item()
 
-    def _load_data(
-        self, data_path: str, file_name: str | None = None
-    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+    def _load_data(self, data_path: str, file_name: str | None = None) -> pd.DataFrame:
         if os.path.exists(data_path):
             file_list = os.listdir(data_path)
             if file_name is None:
@@ -347,6 +345,10 @@ class SplitStateActionEnv(gym.Env):
                     f"{self._start_index_path}/{file_name}_short_dict.npy",
                     allow_pickle=True,
                 ).item()
+            if init_state_index not in start_file_dict:
+                raise ValueError(
+                    f"Invalid init state index: {init_state_index} in file {file_name}"
+                )
             start_index_list = start_file_dict[init_state_index]
             if len(start_index_list) == 0:
                 raise ValueError(
