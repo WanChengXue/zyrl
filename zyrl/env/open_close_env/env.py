@@ -48,12 +48,12 @@ class SplitStateActionEnv(gym.Env):
         self._trading_config = {
             "current_holding": self._holding,
             "commission_value": config.get("commission_value", 0.12),
-            "util_termination": config.get("util_termination", False),
         }
         self._load_state_index()
         self._init_obs_and_action()
         self._reward_function = MultiActionShortLongReward(
-            self._trading_config["commission_value"]
+            self._trading_config["commission_value"],
+            fixed_commission=config.get("fixed_commission", False),
         )
 
     def _init_obs_and_action(self):
@@ -65,6 +65,7 @@ class SplitStateActionEnv(gym.Env):
                         "delta2": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta3": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "pred": gym.spaces.Box(low=-20, high=20, shape=(1,)),
+                        "mask": gym.spaces.Box(low=0, high=1, shape=(4,)),
                     }
                 )
                 self.action_space = gym.spaces.Discrete(4)
@@ -76,6 +77,7 @@ class SplitStateActionEnv(gym.Env):
                         "delta3": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta4": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "pred": gym.spaces.Box(low=-20, high=20, shape=(1,)),
+                        "mask": gym.spaces.Box(low=0, high=1, shape=(5,)),
                     }
                 )
                 self.action_space = gym.spaces.Discrete(5)
@@ -88,6 +90,7 @@ class SplitStateActionEnv(gym.Env):
                         "delta4": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta5": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "pred": gym.spaces.Box(low=-20, high=20, shape=(1,)),
+                        "mask": gym.spaces.Box(low=0, high=1, shape=(6,)),
                     }
                 )
                 self.action_space = gym.spaces.Discrete(6)
@@ -98,6 +101,7 @@ class SplitStateActionEnv(gym.Env):
                         "delta1": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta2": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta3": gym.spaces.Box(low=0, high=1, shape=(1,)),
+                        "mask": gym.spaces.Box(low=0, high=1, shape=(4,)),
                     }
                 )
                 self.action_space = gym.spaces.Discrete(4)
@@ -108,6 +112,7 @@ class SplitStateActionEnv(gym.Env):
                         "delta2": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta3": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta4": gym.spaces.Box(low=0, high=1, shape=(1,)),
+                        "mask": gym.spaces.Box(low=0, high=1, shape=(5,)),
                     }
                 )
                 self.action_space = gym.spaces.Discrete(5)
@@ -119,6 +124,7 @@ class SplitStateActionEnv(gym.Env):
                         "delta3": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta4": gym.spaces.Box(low=0, high=1, shape=(1,)),
                         "delta5": gym.spaces.Box(low=0, high=1, shape=(1,)),
+                        "mask": gym.spaces.Box(low=0, high=1, shape=(6,)),
                     }
                 )
                 self.action_space = gym.spaces.Discrete(6)
@@ -142,6 +148,62 @@ class SplitStateActionEnv(gym.Env):
 
         raise FileNotFoundError(f"数据文件不存在: {data_path}")
 
+    def _get_mask(self, delta_list):
+        if len(delta_list) == 3:
+            mask = [False for _ in range(4)]
+            mask[0] = True
+            if delta_list[0] != 0:
+                mask[1] = True
+            if delta_list[1] != 0 and delta_list[0] != 0:
+                mask[2] = True
+            if delta_list[2] != 0 and delta_list[1] != 0 and delta_list[0] != 0:
+                mask[3] = True
+
+        elif len(delta_list) == 4:
+            mask = [False for _ in range(5)]
+            mask[0] = True
+            if delta_list[0] != 0:
+                mask[1] = True
+            if delta_list[1] != 0 and delta_list[0] != 0:
+                mask[2] = True
+            if delta_list[2] != 0 and delta_list[1] != 0 and delta_list[0] != 0:
+                mask[3] = True
+            if (
+                delta_list[3] != 0
+                and delta_list[2] != 0
+                and delta_list[1] != 0
+                and delta_list[0] != 0
+            ):
+                mask[4] = True
+
+        elif len(delta_list) == 5:
+            mask = [False for _ in range(6)]
+            mask[0] = True
+            if delta_list[0] != 0:
+                mask[1] = True
+            if delta_list[1] != 0 and delta_list[0] != 0:
+                mask[2] = True
+            if delta_list[2] != 0 and delta_list[1] != 0 and delta_list[0] != 0:
+                mask[3] = True
+            if (
+                delta_list[3] != 0
+                and delta_list[2] != 0
+                and delta_list[1] != 0
+                and delta_list[0] != 0
+            ):
+                mask[4] = True
+            if (
+                delta_list[4] != 0
+                and delta_list[3] != 0
+                and delta_list[2] != 0
+                and delta_list[1] != 0
+                and delta_list[0] != 0
+            ):
+                mask[5] = True
+        else:
+            raise ValueError(f"Invalid delta list length: {len(delta_list)}")
+        return np.array(mask)
+
     def _get_current_state_data(
         self, predict_value_row: pd.Series
     ) -> dict[str, np.ndarray]:
@@ -153,13 +215,27 @@ class SplitStateActionEnv(gym.Env):
                 "delta1": np.array([expect_long_delta_1]),
                 "delta2": np.array([expect_long_delta_2]),
                 "delta3": np.array([expect_long_delta_3]),
+                "mask": self._get_mask(
+                    [expect_long_delta_1, expect_long_delta_2, expect_long_delta_3]
+                ),
             }
             if self._rank == 4:
                 expect_long_delta_4 = float(
                     predict_value_row["TradeRate_NF_Long_Delta4"]
                 )
                 state.update({"delta4": np.array([expect_long_delta_4])})
-
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_long_delta_1,
+                                expect_long_delta_2,
+                                expect_long_delta_3,
+                                expect_long_delta_4,
+                            ]
+                        )
+                    }
+                )
             if self._rank == 5:
                 expect_long_delta_4 = float(
                     predict_value_row["TradeRate_NF_Long_Delta4"]
@@ -173,7 +249,19 @@ class SplitStateActionEnv(gym.Env):
                         "delta5": np.array([expect_long_delta_5]),
                     }
                 )
-
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_long_delta_1,
+                                expect_long_delta_2,
+                                expect_long_delta_3,
+                                expect_long_delta_4,
+                                expect_long_delta_5,
+                            ]
+                        )
+                    }
+                )
             if self._pred_using:
                 pred_value = float(predict_value_row["Pred"]) * float(
                     predict_value_row["Std"]
@@ -187,23 +275,51 @@ class SplitStateActionEnv(gym.Env):
                 "delta1": np.array([expect_short_delta_1]),
                 "delta2": np.array([expect_short_delta_2]),
                 "delta3": np.array([expect_short_delta_3]),
+                "mask": self._get_mask(
+                    [expect_short_delta_1, expect_short_delta_2, expect_short_delta_3]
+                ),
             }
             if self._rank == 4:
                 expect_short_delta_4 = float(
                     predict_value_row["TradeRate_NF_Short_Delta4"]
                 )
                 state.update({"delta4": np.array([expect_short_delta_4])})
-            if self._rank == 5:
-                expect_long_delta_4 = float(
-                    predict_value_row["TradeRate_NF_Long_Delta4"]
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_short_delta_1,
+                                expect_short_delta_2,
+                                expect_short_delta_3,
+                                expect_short_delta_4,
+                            ]
+                        )
+                    }
                 )
-                expect_long_delta_5 = float(
-                    predict_value_row["TradeRate_NF_Long_Delta5"]
+            if self._rank == 5:
+                expect_short_delta_4 = float(
+                    predict_value_row["TradeRate_NF_Short_Delta4"]
+                )
+                expect_short_delta_5 = float(
+                    predict_value_row["TradeRate_NF_Short_Delta5"]
                 )
                 state.update(
                     {
-                        "delta4": np.array([expect_long_delta_4]),
-                        "delta5": np.array([expect_long_delta_5]),
+                        "delta4": np.array([expect_short_delta_4]),
+                        "delta5": np.array([expect_short_delta_5]),
+                    }
+                )
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_short_delta_1,
+                                expect_short_delta_2,
+                                expect_short_delta_3,
+                                expect_short_delta_4,
+                                expect_short_delta_5,
+                            ]
+                        )
                     }
                 )
             if self._pred_using:
@@ -219,23 +335,51 @@ class SplitStateActionEnv(gym.Env):
                 "delta1": np.array([expect_short_delta_1]),
                 "delta2": np.array([expect_short_delta_2]),
                 "delta3": np.array([expect_short_delta_3]),
+                "mask": self._get_mask(
+                    [expect_short_delta_1, expect_short_delta_2, expect_short_delta_3]
+                ),
             }
             if self._rank == 4:
                 expect_short_delta_4 = float(
                     predict_value_row["TradeRate_NF_Short_Delta4"]
                 )
                 state.update({"delta4": np.array([expect_short_delta_4])})
-            if self._rank == 5:
-                expect_long_delta_4 = float(
-                    predict_value_row["TradeRate_NF_Long_Delta4"]
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_short_delta_1,
+                                expect_short_delta_2,
+                                expect_short_delta_3,
+                                expect_short_delta_4,
+                            ]
+                        )
+                    }
                 )
-                expect_long_delta_5 = float(
-                    predict_value_row["TradeRate_NF_Long_Delta5"]
+            if self._rank == 5:
+                expect_short_delta_4 = float(
+                    predict_value_row["TradeRate_NF_Short_Delta4"]
+                )
+                expect_short_delta_5 = float(
+                    predict_value_row["TradeRate_NF_Short_Delta5"]
                 )
                 state.update(
                     {
-                        "delta4": np.array([expect_long_delta_4]),
-                        "delta5": np.array([expect_long_delta_5]),
+                        "delta4": np.array([expect_short_delta_4]),
+                        "delta5": np.array([expect_short_delta_5]),
+                    }
+                )
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_short_delta_1,
+                                expect_short_delta_2,
+                                expect_short_delta_3,
+                                expect_short_delta_4,
+                                expect_short_delta_5,
+                            ]
+                        )
                     }
                 )
             if self._pred_using:
@@ -251,12 +395,27 @@ class SplitStateActionEnv(gym.Env):
                 "delta1": np.array([expect_long_delta_1]),
                 "delta2": np.array([expect_long_delta_2]),
                 "delta3": np.array([expect_long_delta_3]),
+                "mask": self._get_mask(
+                    [expect_long_delta_1, expect_long_delta_2, expect_long_delta_3]
+                ),
             }
             if self._rank == 4:
                 expect_long_delta_4 = float(
                     predict_value_row["TradeRate_NF_Long_Delta4"]
                 )
                 state.update({"delta4": np.array([expect_long_delta_4])})
+                state.update(
+                    {
+                        "mask": self._get_mask(
+                            [
+                                expect_long_delta_1,
+                                expect_long_delta_2,
+                                expect_long_delta_3,
+                                expect_long_delta_4,
+                            ]
+                        )
+                    }
+                )
             if self._rank == 5:
                 expect_long_delta_4 = float(
                     predict_value_row["TradeRate_NF_Long_Delta4"]
@@ -294,34 +453,58 @@ class SplitStateActionEnv(gym.Env):
             }
 
         if action_op == "OpenLong":
+            ask_price1 = current_trade_data["AskPrice1"]
+            price_long_delta = current_trade_data[
+                "Price_Long_Delta" + str(action_index)
+            ]
+            if ask_price1 < price_long_delta:
+                current_lp = ask_price1
+            else:
+                current_lp = price_long_delta
             return {
-                "current_LP": np.array(
-                    [current_trade_data["Price_Long_Delta" + str(action_index)]]
-                ),
+                "current_LP": np.array([current_lp]),
                 "next_MP": np.array([next_trade_data["MidPrice"]]),
             }
 
         if action_op == "CloseLong":
+            bid_price1 = current_trade_data["BidPrice1"]
+            price_short_delta = current_trade_data[
+                "Price_Short_Delta" + str(action_index)
+            ]
+            if price_short_delta < bid_price1:
+                current_sp = bid_price1
+            else:
+                current_sp = price_short_delta
             return {
-                "current_SP": np.array(
-                    [current_trade_data["Price_Short_Delta" + str(action_index)]]
-                ),
+                "current_SP": np.array([current_sp]),
                 "current_MP": np.array([current_trade_data["MidPrice"]]),
             }
 
         if action_op == "OpenShort":
+            bid_price1 = current_trade_data["BidPrice1"]
+            price_short_delta = current_trade_data[
+                "Price_Short_Delta" + str(action_index)
+            ]
+            if price_short_delta < bid_price1:
+                current_sp = bid_price1
+            else:
+                current_sp = price_short_delta
             return {
-                "current_SP": np.array(
-                    [current_trade_data["Price_Short_Delta" + str(action_index)]]
-                ),
+                "current_SP": np.array([current_sp]),
                 "next_MP": np.array([next_trade_data["MidPrice"]]),
             }
 
         if action_op == "CloseShort":
+            ask_price1 = current_trade_data["AskPrice1"]
+            price_long_delta = current_trade_data[
+                "Price_Long_Delta" + str(action_index)
+            ]
+            if ask_price1 < price_long_delta:
+                current_lp = ask_price1
+            else:
+                current_lp = price_long_delta
             return {
-                "current_LP": np.array(
-                    [current_trade_data["Price_Long_Delta" + str(action_index)]]
-                ),
+                "current_LP": np.array([current_lp]),
                 "current_MP": np.array([current_trade_data["MidPrice"]]),
             }
 
@@ -333,7 +516,8 @@ class SplitStateActionEnv(gym.Env):
             random.seed(seed)
         file_name = random.choice(file_list)
         if init_state_index is None:
-            start_index = 0
+            len_file = len(load_dataframe(os.path.join(self._data_path, file_name)))
+            start_index = random.randint(0, len_file - 100)
         else:
             if self._env_type in ["open_long", "close_short"]:
                 start_file_dict = np.load(
@@ -393,7 +577,7 @@ class SplitStateActionEnv(gym.Env):
     def step(
         self, action: np.ndarray | int
     ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
-        action_op, action_index = self._convert_action_to_action_op(
+        action_op, action_index, jump_flag = self._convert_action_to_action_op(
             action,
             self._trading_config["current_holding"],
             self._training_data.iloc[self._current_index],
@@ -405,9 +589,9 @@ class SplitStateActionEnv(gym.Env):
             action_index,
         )
         reward, next_holding = self._reward_function(
-            price_info, action_op, self._trading_config["current_holding"]
+            price_info, action_op, self._trading_config["current_holding"], jump_flag
         )
-        done = self._done(next_holding, self._trading_config["util_termination"])
+        done = self._done(next_holding)
         self._trading_config["current_holding"] = next_holding
         self._current_index += 1
         state = self._get_current_state_data(
@@ -420,111 +604,51 @@ class SplitStateActionEnv(gym.Env):
             "current_holding": self._trading_config["current_holding"],
         }
         info.update(price_info)
-        # if (
-        #     self._env_type in ["open_long", "open_short"]
-        #     and not self._trading_config["util_termination"]
-        #     and done
-        # ):
-        # rollout_reward = self._rollout_reward(state)
-        # reward += rollout_reward
-        return state, reward, done, False, info
-
-    def _set_long_table(self):
-        self._long_table = pd.read_csv(self._config["long_table_path"])
-
-    def _set_short_table(self):
-        self._short_table = pd.read_csv(self._config["short_table_path"])
+        return state, reward, done, done, info
 
     def set_env_type(self, env_type: str) -> None:
         self._env_type = env_type
 
-    def _done(self, next_holding: int, util_termination: bool = False) -> bool:
-        if util_termination:
-            if self._current_index >= len(self._training_data) - 5:
-                return True
+    def _done(self, next_holding: int) -> bool:
+        if self._current_index >= len(self._training_data) - 5:
+            return True
+        if self._env_type in ["open_long", "open_short"] and next_holding != 0:
+            return True
+        if self._env_type in ["close_long", "close_short"] and next_holding == 0:
+            return True
         else:
-            if self._current_index >= len(self._training_data) - 5:
-                return True
-            if self._env_type in ["open_long", "open_short"] and next_holding != 0:
-                return True
-            if self._env_type in ["close_long", "close_short"] and next_holding == 0:
-                return True
-            else:
-                return False
-
-    def _rollout_reward(self, state: dict[str, np.ndarray]) -> float:
-        # 如果是open_long/open_short，则需要计算rollout奖励
-        assert self._env_type in ["open_long", "open_short"]
-        switch_env_type = (
-            "close_long" if self._env_type == "open_long" else "close_short"
-        )
-        if switch_env_type == "close_long":
-            self._set_long_table()
-        else:
-            self._set_short_table()
-        self.set_env_type(switch_env_type)
-        rollout_done = False
-        rollout_reward = 0
-        while not rollout_done:
-            state_index = self.get_state_index(state)
-            # 第一列是索引列，因此此处需要去掉第一列进行操作
-            if switch_env_type == "close_long":
-                action_list = self._long_table.iloc[state_index].values[1:]
-            else:
-                action_list = self._short_table.iloc[state_index].values[1:]
-            action = int(np.argmax(action_list))
-            action_op, action_index = self._convert_action_to_action_op(
-                action,
-                self._trading_config["current_holding"],
-                self._training_data.iloc[self._current_index],
-            )
-            price_info = self._get_price_info(
-                self._training_data.iloc[self._current_index],
-                self._training_data.iloc[self._current_index + 1],
-                action_op,
-                action_index,
-            )
-            reward, next_holding = self._reward_function(
-                price_info, action_op, self._trading_config["current_holding"]
-            )
-            rollout_reward += reward
-            rollout_done = self._done(
-                next_holding, self._trading_config["util_termination"]
-            )
-            self._trading_config["current_holding"] = next_holding
-            self._current_index += 1
-            state = self._get_current_state_data(
-                self._training_data.iloc[self._current_index]
-            )
-        return rollout_reward
+            return False
 
     def _convert_action_to_action_op(
         self, action: np.ndarray | int, current_holding: int, trading_data: pd.Series
     ) -> tuple[str, int]:
+        jump_flag = True
         if action == 0:
-            return "Keep", 0
+            return ("Keep", 0, jump_flag)
 
         if self._env_type in ["open_long", "close_short"]:
             trading_prob = trading_data["TradeRate_Long_Delta" + str(action)]
             random_value = random.random()
             if random_value <= trading_prob:
                 return (
-                    ("OpenLong", action)
+                    ("OpenLong", action, jump_flag)
                     if current_holding == 0
-                    else ("CloseShort", action)
+                    else ("CloseShort", action, jump_flag)
                 )
-            return ("Keep", 0)
+            jump_flag = False
+            return ("Keep", 0, jump_flag)
 
         if self._env_type in ["open_short", "close_long"]:
             trading_prob = trading_data["TradeRate_Short_Delta" + str(action)]
             random_value = random.random()
             if random_value <= trading_prob:
                 return (
-                    ("OpenShort", action)
+                    ("OpenShort", action, jump_flag)
                     if current_holding == 0
-                    else ("CloseLong", action)
+                    else ("CloseLong", action, jump_flag)
                 )
-            return ("Keep", 0)
+            jump_flag = False
+            return ("Keep", 0, jump_flag)
 
         raise ValueError(f"Invalid action: {action}")
 
@@ -671,3 +795,80 @@ class SplitStateActionEnv(gym.Env):
 
     def render(self):
         pass
+
+    def get_state_from_file(self, file_name: str):
+        data = load_dataframe(file_name)
+        if self._env_type in ["open_long", "close_short"]:
+            if self._rank == 3:
+                state = data[
+                    [
+                        "TradeRate_NF_Long_Delta1",
+                        "TradeRate_NF_Long_Delta2",
+                        "TradeRate_NF_Long_Delta3",
+                    ]
+                ]
+            elif self._rank == 4:
+                state = data[
+                    [
+                        "TradeRate_NF_Long_Delta1",
+                        "TradeRate_NF_Long_Delta2",
+                        "TradeRate_NF_Long_Delta3",
+                        "TradeRate_NF_Long_Delta4",
+                    ]
+                ]
+            elif self._rank == 5:
+                state = data[
+                    [
+                        "TradeRate_NF_Long_Delta1",
+                        "TradeRate_NF_Long_Delta2",
+                        "TradeRate_NF_Long_Delta3",
+                        "TradeRate_NF_Long_Delta4",
+                        "TradeRate_NF_Long_Delta5",
+                    ]
+                ]
+            else:
+                raise ValueError(f"Invalid rank: {self._rank}")
+        elif self._env_type in ["open_short", "close_long"]:
+            if self._rank == 3:
+                state = data[
+                    [
+                        "TradeRate_NF_Short_Delta1",
+                        "TradeRate_NF_Short_Delta2",
+                        "TradeRate_NF_Short_Delta3",
+                    ]
+                ]
+            elif self._rank == 4:
+                state = data[
+                    [
+                        "TradeRate_NF_Short_Delta1",
+                        "TradeRate_NF_Short_Delta2",
+                        "TradeRate_NF_Short_Delta3",
+                        "TradeRate_NF_Short_Delta4",
+                    ]
+                ]
+            elif self._rank == 5:
+                state = data[
+                    [
+                        "TradeRate_NF_Short_Delta1",
+                        "TradeRate_NF_Short_Delta2",
+                        "TradeRate_NF_Short_Delta3",
+                        "TradeRate_NF_Short_Delta4",
+                        "TradeRate_NF_Short_Delta5",
+                    ]
+                ]
+            else:
+                raise ValueError(f"Invalid rank: {self._rank}")
+        elif self._env_type in ["open_short", "close_long"]:
+            state = data[
+                [
+                    "TradeRate_NF_Short_Delta1",
+                    "TradeRate_NF_Short_Delta2",
+                    "TradeRate_NF_Short_Delta3",
+                ]
+            ]
+        else:
+            raise ValueError(f"Invalid env type: {self._env_type}")
+        if self._pred_using:
+            pred_value = float(data["Pred"]) * float(data["Std"])
+            state = pd.concat([state, pd.Series({"pred": pred_value})], axis=1)
+        return state.values

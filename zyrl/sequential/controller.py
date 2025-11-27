@@ -56,9 +56,9 @@ class Controller:
             for task_name, action_dict in result_dict.items():
                 action_list = action_dict[file_name]
                 data[task_name] = action_list
-                data.to_csv(os.path.join(saved_folder_path, file_name), index=False)
+                data.to_csv(os.path.join(saved_folder_path, file_name), index=True)
             data_list.append(data)
         concat_data = pd.concat(data_list, axis=0)
         concat_data.to_csv(
-            os.path.join(saved_folder_path, "concat_data.csv"), index=False
+            os.path.join(saved_folder_path, "concat_data.csv"), index=True
         )

@@ -330,13 +330,12 @@ def test_mc(env_type, data_folder, pred_using=False):
         "data_path": f"./data/delta3/{data_folder}",
         "env_type": env_type,
         "pred_using": pred_using,
-        "commission_value": 0.125,
+        "commission_value": 0.128,
         "rank": 3,
         "index_state_dict_path": f"./data/{index_table_folder}/index_state_dict.npy",
         "state_index_mapping_path": f"./data/{index_table_folder}/state_index_mapping.npy",
         "start_index_path": f"./data/{table_folder}_result",
-        "long_table_path": f"./data/{table_folder}_result/q_table_close_long.csv",
-        "short_table_path": f"./data/{table_folder}_result/q_table_close_short.csv",
+        "fixed_commission": True,
     }
 
     mc_config = {

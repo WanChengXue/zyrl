@@ -44,11 +44,28 @@ def backtest_node(config: dict):
 class BacktestWorker:
     def __init__(self, config: dict):
         self._config = config
+        self._file_name = config["env_config"]["file_name"]
+        self._saved_folder_name = config.get("saved_folder_name", "backtest_result")
+        if not os.path.exists(self._saved_folder_name):
+            os.makedirs(self._saved_folder_name)
+
+        self._use_log = config.get("use_log", False)
+        self._rebate_rate = config.get("rebate_rate", 0.25 * 0.94)
+        self._send_order_price = np.array(config.get("send_order_price", 1 / 200))
+        self._cancel_order_price = np.array(config.get("cancel_order_price", 1 / 200))
         self._use_benchmark = config.get("use_benchmark", False)
-        if not self._use_benchmark:
+        self._use_rl = config.get("use_rl", False)
+        if not self._use_benchmark and not self._use_rl:
             self._load_q_table()
+        if self._use_rl:
+            self._load_csv_table()
         self._init_env()
         self._commission_value = self._config["env_config"]["commission_value"]
+
+    def _load_csv_table(self):
+        file_name = self._config["env_config"]["file_name"]
+        action_table_path = self._config["action_table_path"]
+        self._action_csv = pd.read_csv(os.path.join(action_table_path, file_name))
 
     def _load_q_table(self):
         self._q_table = {}
@@ -67,6 +84,20 @@ class BacktestWorker:
 
     def _init_env(self):
         self._env = SplitStateActionEnvBacktest(self._config["env_config"])
+
+    def _get_action_rl(self, state: gym.spaces.Dict) -> tuple[int, int]:
+        state_index = self._env._current_index
+        env_holding = self._env._holding
+        if env_holding == 0:
+            long_action = self._action_csv.iloc[state_index]["open_long"]
+            short_action = self._action_csv.iloc[state_index]["open_short"]
+        elif env_holding == 1:
+            long_action = self._action_csv.iloc[state_index]["close_long"]
+            short_action = self._action_csv.iloc[state_index]["open_short"]
+        elif env_holding == -1:
+            long_action = self._action_csv.iloc[state_index]["open_long"]
+            short_action = self._action_csv.iloc[state_index]["close_short"]
+        return (int(long_action), int(short_action))
 
     def _get_action(self, state: gym.spaces.Dict) -> tuple[int, int]:
         q_table_index = self._env.get_state_index(state, self._env._rank)
@@ -99,6 +130,8 @@ class BacktestWorker:
                 "grossReturn",
                 "commissionFee",
                 "cleanReturn",
+                "cancelOrderPrice",
+                "sendOrderPrice",
             ]
         )
         reward_list = []
@@ -109,12 +142,18 @@ class BacktestWorker:
         diff_reward = 0
         prev_holding = 0
         op_index = 0
+        send_times = 0
+        cancel_times = 0
         while not done:
             if self._use_benchmark:
                 action = self._env.get_best_action(current_state)
+            elif self._use_rl:
+                action = self._get_action_rl(current_state)
             else:
                 action = self._get_action(current_state)
             current_state, reward, done, _, info = self._env.step(action)
+            send_times += info["send_times"]
+            cancel_times += info["cancle_times"]
             reward_list.append(reward)
             diff_reward += reward
             new_holding = info["current_holding"]
@@ -130,18 +169,40 @@ class BacktestWorker:
                         -info["price_info"]["long"]["current_LP"]
                         + info["price_info"]["short"]["current_SP"]
                     )
-                    clean_return = gross_return - self._commission_value * 2
+                    send_order_price = self._send_order_price * send_times
+                    cancel_order_price = self._cancel_order_price * cancel_times
+                    commission_fee_long = (
+                        self._commission_value
+                        * info["price_info"]["long"]["current_LP"]
+                        * (1 - self._rebate_rate)
+                    )
+                    commission_fee_short = (
+                        self._commission_value
+                        * info["price_info"]["short"]["current_SP"]
+                        * (1 - self._rebate_rate)
+                    )
+                    clean_return = (
+                        gross_return
+                        - commission_fee_long
+                        - commission_fee_short
+                        - send_order_price
+                        - cancel_order_price
+                    )
                     detailed_table.loc[op_index] = [
                         ts,
                         new_holding,
                         action_op,
                         diff_reward.item(),
                         gross_return.item(),
-                        self._commission_value,
+                        commission_fee_long.item() + commission_fee_short.item(),
                         clean_return.item(),
+                        cancel_order_price.item(),
+                        send_order_price.item(),
                     ]
                     op_index += 1
                     diff_reward = 0
+                    send_times = 0
+                    cancel_times = 0
 
             if new_holding != prev_holding:
                 ts = info["current_ts_str"]
@@ -153,36 +214,138 @@ class BacktestWorker:
                     )
                     if action_op == "open_long":
                         gross_return = -info["price_info"]["long"]["current_LP"]
+                        commission_fee = (
+                            info["price_info"]["long"]["current_LP"]
+                            * self._commission_value
+                            * (1 - self._rebate_rate)
+                        )
                     else:
                         gross_return = info["price_info"]["short"]["current_SP"]
+                        commission_fee = (
+                            info["price_info"]["short"]["current_SP"]
+                            * self._commission_value
+                            * (1 - self._rebate_rate)
+                        )
                 else:
                     if "long" in action:
                         action_op = "open_long" if new_holding == 1 else "close_long"
                         if action_op == "close_long":
                             gross_return = info["price_info"]["long"]["current_SP"]
+                            commission_fee = (
+                                info["price_info"]["long"]["current_SP"]
+                                * self._commission_value
+                                * (1 - self._rebate_rate)
+                            )
                         if action_op == "open_long":
                             gross_return = -info["price_info"]["long"]["current_LP"]
+                            commission_fee = (
+                                info["price_info"]["long"]["current_LP"]
+                                * self._commission_value
+                                * (1 - self._rebate_rate)
+                            )
                     if "short" in action:
                         action_op = "open_short" if new_holding == -1 else "close_short"
                         if action_op == "close_short":
                             gross_return = -info["price_info"]["short"]["current_LP"]
+                            commission_fee = (
+                                info["price_info"]["short"]["current_LP"]
+                                * self._commission_value
+                                * (1 - self._rebate_rate)
+                            )
                         if action_op == "open_short":
                             gross_return = info["price_info"]["short"]["current_SP"]
+                            commission_fee = (
+                                info["price_info"]["short"]["current_SP"]
+                                * self._commission_value
+                                * (1 - self._rebate_rate)
+                            )
 
-                clean_return = gross_return - self._commission_value
+                send_order_price = self._send_order_price * send_times
+                cancel_order_price = self._cancel_order_price * cancel_times
+                clean_return = (
+                    gross_return
+                    - commission_fee
+                    - send_order_price
+                    - cancel_order_price
+                )
                 detailed_table.loc[op_index] = [
                     ts,
                     holding,
                     action_op,
                     diff_reward.item(),
                     gross_return.item(),
-                    self._commission_value,
+                    commission_fee.item(),
                     clean_return.item(),
+                    cancel_order_price.item(),
+                    send_order_price.item(),
                 ]
                 op_index += 1
                 prev_holding = new_holding
                 diff_reward = 0
-        # detailed_table.to_csv("./data/backtest_detailed_table.csv")
+                send_times = 0
+                cancel_times = 0
+        done_info = info["force_close_info"]
+        if done_info:
+            # 强制平多
+            if "long_price" in done_info:
+                ts = done_info["ts"]
+                holding = done_info["long_next_holding"]
+                action_op = done_info["long_action_op"]
+                gross_return = done_info["long_price"]
+                commission_fee = (
+                    done_info["long_price"]
+                    * self._commission_value
+                    * (1 - self._rebate_rate)
+                )
+                send_times += 1
+                send_order_price = self._send_order_price * send_times
+                cancel_order_price = self._cancel_order_price * cancel_times
+                clean_return = (
+                    gross_return
+                    - commission_fee
+                    - send_order_price
+                    - cancel_order_price
+                )
+                diff_reward += done_info["long_reward"]
+                op_index += 1
+            if "short_price" in done_info:
+                ts = done_info["ts"]
+                holding = done_info["short_next_holding"]
+                action_op = done_info["short_action_op"]
+                gross_return = -done_info["short_price"]
+                commission_fee = (
+                    done_info["short_price"]
+                    * self._commission_value
+                    * (1 - self._rebate_rate)
+                )
+                send_times += 1
+                send_order_price = self._send_order_price * send_times
+                cancel_order_price = self._cancel_order_price * cancel_times
+                clean_return = (
+                    gross_return
+                    - commission_fee
+                    - send_order_price
+                    - cancel_order_price
+                )
+                diff_reward += done_info["short_reward"]
+                op_index += 1
+            detailed_table.loc[op_index] = [
+                ts,
+                holding,
+                action_op,
+                diff_reward.item(),
+                gross_return.item(),
+                commission_fee.item(),
+                clean_return.item(),
+                cancel_order_price.item(),
+                send_order_price.item(),
+            ]
+            op_index += 1
+        if self._use_log:
+            detailed_table.to_csv(
+                f"{self._saved_folder_name}/backtest_detailed_table_{self._file_name}.csv"
+            )
+
         return {self._config["env_config"]["file_name"]: reward_list}
 
 

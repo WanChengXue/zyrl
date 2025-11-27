@@ -14,8 +14,14 @@ class MultiActionShortLongReward:
     including opening/closing long/short positions and keeping positions.
     """
 
-    def __init__(self, commission_value) -> None:
+    def __init__(
+        self, commission_value, multiplier=200, fixed_commission: bool = False
+    ) -> None:
+        self._fixed_commission = fixed_commission
         self._commission_value = commission_value
+        self._rebate_rate = 0.25 * 0.94
+        self._send_order_price = 1 / multiplier
+        self._cancel_order_price = 1 / multiplier
 
     def open_long_reward(self, price_info: dict, current_holding: int) -> float:
         """Calculate reward for opening long position.
@@ -100,7 +106,14 @@ class MultiActionShortLongReward:
     def _open_long(self, price_info):
         next_mp = price_info["next_MP"]
         current_lp = price_info["current_LP"]
-        return next_mp - current_lp - self._commission_value
+        if self._fixed_commission:
+            commission_fee = self._commission_value
+        else:
+            commission_fee = (
+                self._commission_value * current_lp * (1 - self._rebate_rate)
+            )
+        # add send order price, and add mulipier * commission value * current_lp * (1-rebate_rate)
+        return next_mp - current_lp - commission_fee - self._send_order_price
 
     def _keep_long(self, price_info):
         next_mp = price_info["next_MP"]
@@ -110,12 +123,24 @@ class MultiActionShortLongReward:
     def _close_long(self, price_info):
         current_sp = price_info["current_SP"]
         current_mp = price_info["current_MP"]
-        return current_sp - self._commission_value - current_mp
+        if self._fixed_commission:
+            commission_fee = self._commission_value
+        else:
+            commission_fee = (
+                self._commission_value * current_sp * (1 - self._rebate_rate)
+            )
+        return current_sp - current_mp - commission_fee - self._send_order_price
 
     def _open_short(self, price_info):
         current_sp = price_info["current_SP"]
         next_mp = price_info["next_MP"]
-        return current_sp - self._commission_value - next_mp
+        if self._fixed_commission:
+            commission_fee = self._commission_value
+        else:
+            commission_fee = (
+                self._commission_value * current_sp * (1 - self._rebate_rate)
+            )
+        return current_sp - next_mp - commission_fee - self._send_order_price
 
     def _keep_short(self, price_info):
         current_mp = price_info["current_MP"]
@@ -125,10 +150,20 @@ class MultiActionShortLongReward:
     def _close_short(self, price_info):
         current_mp = price_info["current_MP"]
         current_lp = price_info["current_LP"]
-        return current_mp - current_lp - self._commission_value
+        if self._fixed_commission:
+            commission_fee = self._commission_value
+        else:
+            commission_fee = (
+                self._commission_value * current_lp * (1 - self._rebate_rate)
+            )
+        return current_mp - current_lp - commission_fee - self._send_order_price
 
     def __call__(
-        self, price_info: dict, action: str, current_holding: int
+        self,
+        price_info: dict,
+        action: str,
+        current_holding: int,
+        jump_flag: bool = True,
     ) -> tuple[np.ndarray, int]:
         action_map = {
             "OpenLong": (lambda: self.open_long_reward(price_info, current_holding), 1),
@@ -146,9 +181,23 @@ class MultiActionShortLongReward:
 
         # Default case for keeping current position
         if current_holding == 0:
-            return np.array([0.0]), 0
+            if jump_flag:
+                return np.array([0.0]), 0
+            else:
+                # 说明想要从仓位0进行跳转，失败了，需要扣除发送订单和取消订单的成本
+                return np.array([-self._send_order_price - self._cancel_order_price]), 0
         if current_holding == -1:
-            return self.keep_short_reward(price_info), -1
+            reward = self.keep_short_reward(price_info)
+            if jump_flag:
+                return reward, -1
+            else:
+                # 说明想要从仓位-1进行跳转，失败，需要扣除发送和取消订单成本
+                return reward - self._send_order_price - self._cancel_order_price, -1
         if current_holding == 1:
-            return self.keep_long_reward(price_info), 1
+            reward = self.keep_long_reward(price_info)
+            if jump_flag:
+                return reward, 1
+            else:
+                # 说明想要从仓位1进行跳转，失败，需要扣除取发送和取消订单成本
+                return reward - self._cancel_order_price - self._send_order_price, 1
         raise ValueError(f"Invalid current holding: {current_holding}")

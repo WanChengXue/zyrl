@@ -59,6 +59,8 @@ class TaskLink:
             env_config={"task_list": task_list},
             init_q_table=main_task.get_init_q_table(),
             mc_config=main_task.get_mc_config(),
+            train_algo=main_task.get_train_algo(),
+            rl_config=main_task.get_rl_config(),
         )
         return compound_task
 

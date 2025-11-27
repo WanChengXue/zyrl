@@ -38,9 +38,15 @@ class SplitStateActionEnvBacktest(gym.Env):
         self._trading_config = {
             "current_holding": self._holding,
             "commission_value": config.get("commission_value", 0.12),
-            "util_termination": config.get("util_termination", False),
         }
         self._load_state_index()
+        self._init_obs_action()
+        self._reward_function = MultiActionShortLongReward(
+            self._trading_config["commission_value"],
+            fixed_commission=config.get("fixed_commission", False),
+        )
+
+    def _init_obs_action(self):
         if self._pred_using:
             if self._rank == 3:
                 self.observation_space = gym.spaces.Dict(
@@ -113,9 +119,6 @@ class SplitStateActionEnvBacktest(gym.Env):
                     }
                 )
                 self.action_space = gym.spaces.Discrete(5)
-        self._reward_function = MultiActionShortLongReward(
-            self._trading_config["commission_value"]
-        )
 
     def _load_state_index(self):
         self._index_state_dict = np.load(
@@ -236,34 +239,58 @@ class SplitStateActionEnvBacktest(gym.Env):
             }
 
         if action_op == "OpenLong":
+            ask_price1 = current_trade_data["AskPrice1"]
+            price_long_delta = current_trade_data[
+                "Price_Long_Delta" + str(action_index)
+            ]
+            if ask_price1 < price_long_delta:
+                current_lp = ask_price1
+            else:
+                current_lp = price_long_delta
             return {
-                "current_LP": np.array(
-                    [current_trade_data["Price_Long_Delta" + str(action_index)]]
-                ),
+                "current_LP": np.array([current_lp]),
                 "next_MP": np.array([next_trade_data["MidPrice"]]),
             }
 
         if action_op == "CloseLong":
+            bid_price1 = current_trade_data["BidPrice1"]
+            price_short_delta = current_trade_data[
+                "Price_Short_Delta" + str(action_index)
+            ]
+            if price_short_delta < bid_price1:
+                current_sp = bid_price1
+            else:
+                current_sp = price_short_delta
             return {
-                "current_SP": np.array(
-                    [current_trade_data["Price_Short_Delta" + str(action_index)]]
-                ),
+                "current_SP": np.array([current_sp]),
                 "current_MP": np.array([current_trade_data["MidPrice"]]),
             }
 
         if action_op == "OpenShort":
+            bid_price1 = current_trade_data["BidPrice1"]
+            price_short_delta = current_trade_data[
+                "Price_Short_Delta" + str(action_index)
+            ]
+            if price_short_delta < bid_price1:
+                current_sp = bid_price1
+            else:
+                current_sp = price_short_delta
             return {
-                "current_SP": np.array(
-                    [current_trade_data["Price_Short_Delta" + str(action_index)]]
-                ),
+                "current_SP": np.array([current_sp]),
                 "next_MP": np.array([next_trade_data["MidPrice"]]),
             }
 
         if action_op == "CloseShort":
+            ask_price1 = current_trade_data["AskPrice1"]
+            price_long_delta = current_trade_data[
+                "Price_Long_Delta" + str(action_index)
+            ]
+            if ask_price1 < price_long_delta:
+                current_lp = ask_price1
+            else:
+                current_lp = price_long_delta
             return {
-                "current_LP": np.array(
-                    [current_trade_data["Price_Long_Delta" + str(action_index)]]
-                ),
+                "current_LP": np.array([current_lp]),
                 "current_MP": np.array([current_trade_data["MidPrice"]]),
             }
 
@@ -271,8 +298,8 @@ class SplitStateActionEnvBacktest(gym.Env):
         self, *, seed: int | None = None, options: dict[str, Any] = {}
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         file_name = options["file_name"]
-        start_index = options.get("start_index", 0)
         self._training_data = self._load_data(self._data_path, file_name)
+        start_index = options.get("start_index", self._get_start_index())
         self._current_index = start_index
         self._total_index = len(self._training_data)
         trading_data = self._training_data.iloc[self._current_index]
@@ -285,18 +312,28 @@ class SplitStateActionEnvBacktest(gym.Env):
         }
         return state, info
 
+    def _get_start_index(self) -> int:
+        for index in range(len(self._training_data)):
+            if (
+                "_0931" in self._training_data.iloc[index].name
+                or "_1301" in self._training_data.iloc[index].name
+            ):
+                return index
+
     def _cal_reward(
         self,
         action: int,
         env_type: str,
         trading_data: pd.Series,
         next_trading_data: pd.Series,
+        force_close: bool = False,
     ) -> float:
-        action_op, action_index = self._convert_action_to_action_op(
+        action_op, action_index, jump_flag = self._convert_action_to_action_op(
             action,
             env_type,
             self._trading_config["current_holding"],
             trading_data,
+            force_close=force_close,
         )
         price_info = self._get_price_info(
             trading_data,
@@ -305,33 +342,72 @@ class SplitStateActionEnvBacktest(gym.Env):
             action_index,
         )
         reward, next_holding = self._reward_function(
-            price_info, action_op, self._trading_config["current_holding"]
+            price_info, action_op, self._trading_config["current_holding"], jump_flag
         )
         if action_op == "Keep":
             assert next_holding == self._trading_config["current_holding"]
-        return reward, next_holding, price_info, action_op
+        return reward, next_holding, price_info, action_op, jump_flag
 
     def step(
         self, action: tuple[np.ndarray | int, np.ndarray | int]
     ) -> tuple[Any, SupportsFloat, bool, bool, dict[str, Any]]:
         long_action, short_action = action
+        cancle_times = 0
+        send_times = 0
         if self._holding == 0:
-            long_reward, next_long_holding, long_price_info, long_action_op = (
-                self._cal_reward(
-                    long_action,
-                    "open_long",
-                    self._training_data.iloc[self._current_index],
-                    self._training_data.iloc[self._current_index + 1],
-                )
+            (
+                long_reward,
+                next_long_holding,
+                long_price_info,
+                long_action_op,
+                long_jump_flag,
+            ) = self._cal_reward(
+                long_action,
+                "open_long",
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
             )
-            short_reward, next_short_holding, short_price_info, short_action_op = (
-                self._cal_reward(
-                    short_action,
-                    "open_short",
-                    self._training_data.iloc[self._current_index],
-                    self._training_data.iloc[self._current_index + 1],
+            if "Pred" in self._training_data.iloc[self._current_index].index:
+                long_pred_value = self._training_data.iloc[self._current_index]["Pred"]
+            elif "pred" in self._training_data.iloc[self._current_index].index:
+                long_pred_value = self._training_data.iloc[self._current_index]["pred"]
+            else:
+                print(
+                    f"Error: {self._current_index}, {self._training_data.iloc[self._current_index]}"
                 )
+                long_pred_value = 0
+            if not long_jump_flag and long_action != 0 and long_pred_value > 0:
+                # 说明想要从仓位0进行跳转，失败了，需要扣除取消订单的成本
+                cancle_times += 1
+            if long_action != 0 and long_pred_value > 0:
+                send_times += 1
+
+            (
+                short_reward,
+                next_short_holding,
+                short_price_info,
+                short_action_op,
+                short_jump_flag,
+            ) = self._cal_reward(
+                short_action,
+                "open_short",
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
             )
+            if "Pred" in self._training_data.iloc[self._current_index].index:
+                short_pred_value = self._training_data.iloc[self._current_index]["Pred"]
+            elif "pred" in self._training_data.iloc[self._current_index].index:
+                short_pred_value = self._training_data.iloc[self._current_index]["pred"]
+            else:
+                print(
+                    f"Error: {self._current_index}, {self._training_data.iloc[self._current_index]}"
+                )
+                short_pred_value = 0
+            if not short_jump_flag and short_action != 0 and short_pred_value < 0:
+                # 说明想要从仓位0进行跳转，失败了，需要扣除取消订单的成本
+                cancle_times += 1
+            if short_action != 0 and short_pred_value < 0:
+                send_times += 1
             reward = long_reward + short_reward
             new_holding = next_long_holding + next_short_holding
             price_info = {
@@ -343,30 +419,47 @@ class SplitStateActionEnvBacktest(gym.Env):
                 "short": short_action_op,
             }
         elif self._holding == 1:
-            long_reward, next_long_holding, long_price_info, long_action_op = (
-                self._cal_reward(
-                    long_action,
-                    "close_long",
-                    self._training_data.iloc[self._current_index],
-                    self._training_data.iloc[self._current_index + 1],
-                )
+            (
+                long_reward,
+                next_long_holding,
+                long_price_info,
+                long_action_op,
+                long_jump_flag,
+            ) = self._cal_reward(
+                long_action,
+                "close_long",
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
             )
+            if long_action != 0:
+                send_times += 1
             reward = long_reward
             new_holding = next_long_holding
             price_info = {"long": long_price_info}
             action_op = {"long": long_action_op}
             if long_action_op == "Keep":
                 assert new_holding == 1
-
+            if not long_jump_flag and long_action != 0:
+                # 说明想要从仓位1进行跳转，失败了，需要扣除取消订单的成本
+                cancle_times += 1
         elif self._holding == -1:
-            short_reward, next_short_holding, short_price_info, short_action_op = (
-                self._cal_reward(
-                    short_action,
-                    "close_short",
-                    self._training_data.iloc[self._current_index],
-                    self._training_data.iloc[self._current_index + 1],
-                )
+            if short_action != 0:
+                send_times += 1
+            (
+                short_reward,
+                next_short_holding,
+                short_price_info,
+                short_action_op,
+                short_jump_flag,
+            ) = self._cal_reward(
+                short_action,
+                "close_short",
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
             )
+            if not short_jump_flag and short_action != 0:
+                # 说明想要从仓位-1进行跳转，失败了，需要扣除取消订单的成本
+                cancle_times += 1
             reward = short_reward
             new_holding = next_short_holding
             price_info = {"short": short_price_info}
@@ -376,7 +469,9 @@ class SplitStateActionEnvBacktest(gym.Env):
 
         self._holding = new_holding
         self._trading_config["current_holding"] = new_holding
-        done = self._done(self._current_index)
+        done = self._done(
+            self._current_index, self._training_data.iloc[self._current_index].name
+        )
         self._current_index += 1
         # update state
         assert self._holding in [0, 1, -1], f"Invalid holding: {self._holding}"
@@ -412,42 +507,76 @@ class SplitStateActionEnvBacktest(gym.Env):
             {
                 "price_info": price_info,
                 "action_op": action_op,
+                "send_times": send_times,
+                "cancle_times": cancle_times,
             }
         )
         if done:
-            force_reward = self.force_close()
-            reward += force_reward
+            force_close_info = self.force_close()
+            info["force_close_info"] = force_close_info
         return state, reward, done, False, info
 
-    def _done(self, current_index: int) -> bool:
+    def _done(self, current_index: int, current_ts_str: str) -> bool:
         if current_index >= len(self._training_data) - 5:
+            return True
+        trade_day_mins_seconds = current_ts_str.split("_")[1]
+        if (
+            "1129" in trade_day_mins_seconds[0:4]
+            or "1457" in trade_day_mins_seconds[0:4]
+        ):
             return True
         else:
             return False
 
     def force_close(self):
+        force_close_info = {}
+        ts = self._training_data.iloc[self._current_index].name
         if self._holding == 0:
-            return 0
+            return force_close_info
         if self._holding == 1:
-            long_reward, next_long_holding, long_price_info, long_action_op = (
-                self._cal_reward(
-                    2,
-                    "close_long",
-                    self._training_data.iloc[self._current_index],
-                    self._training_data.iloc[self._current_index + 1],
-                )
+            (
+                long_reward,
+                next_long_holding,
+                long_price_info,
+                long_action_op,
+                long_jump_flag,
+            ) = self._cal_reward(
+                2,
+                "close_long",
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
+                force_close=True,
             )
-            return long_reward
+            force_close_info["ts"] = ts
+            force_close_info["long_price"] = long_price_info["current_SP"]
+            force_close_info["long_action_op"] = long_action_op
+            force_close_info["long_jump_flag"] = long_jump_flag
+            force_close_info["long_next_holding"] = next_long_holding
+            force_close_info["long_next_price_info"] = long_price_info
+            force_close_info["long_reward"] = long_reward
+            return force_close_info
         if self._holding == -1:
-            short_reward, next_short_holding, short_price_info, short_action_op = (
-                self._cal_reward(
-                    2,
-                    "close_short",
-                    self._training_data.iloc[self._current_index],
-                    self._training_data.iloc[self._current_index + 1],
-                )
+            (
+                short_reward,
+                next_short_holding,
+                short_price_info,
+                short_action_op,
+                short_jump_flag,
+            ) = self._cal_reward(
+                2,
+                "close_short",
+                self._training_data.iloc[self._current_index],
+                self._training_data.iloc[self._current_index + 1],
+                force_close=True,
             )
-            return short_reward
+            force_close_info["ts"] = ts
+            force_close_info["short_price"] = short_price_info["current_LP"]
+            force_close_info["short_action_op"] = short_action_op
+            force_close_info["short_jump_flag"] = short_jump_flag
+            force_close_info["short_next_holding"] = next_short_holding
+            force_close_info["short_next_price_info"] = short_price_info
+            force_close_info["short_reward"] = short_reward
+            return force_close_info
 
     def _convert_action_to_action_op(
         self,
@@ -455,31 +584,49 @@ class SplitStateActionEnvBacktest(gym.Env):
         env_type: str,
         current_holding: int,
         trading_data: pd.Series,
+        force_close: bool = False,
     ) -> tuple[str, int]:
+        jump_flag = True
         if action == 0:
-            return "Keep", 0
+            return ("Keep", 0, jump_flag)
+
+        if not force_close:
+            # 先判断是否可以进行交易
+            if "Pred" in trading_data.index:
+                pred_value = trading_data["Pred"]
+            if "pred" in trading_data.index:
+                pred_value = trading_data["pred"]
+
+            if env_type == "open_long" and pred_value < 0 and current_holding == 0:
+                return ("Keep", 0, jump_flag)
+            if env_type == "open_short" and pred_value > 0 and current_holding == 0:
+                return ("Keep", 0, jump_flag)
 
         if env_type in ["open_long", "close_short"]:
             trading_prob = trading_data["TradeRate_Long_Delta" + str(action)]
-            random_value = random.random()
+            random_value = random.random() if not force_close else 0.0
+            # random_value = 0.0
             if random_value <= trading_prob:
                 return (
-                    ("OpenLong", action)
+                    ("OpenLong", action, jump_flag)
                     if current_holding == 0
-                    else ("CloseShort", action)
+                    else ("CloseShort", action, jump_flag)
                 )
-            return ("Keep", 0)
+            jump_flag = False
+            return ("Keep", 0, jump_flag)
 
         if env_type in ["open_short", "close_long"]:
             trading_prob = trading_data["TradeRate_Short_Delta" + str(action)]
-            random_value = random.random()
+            random_value = random.random() if not force_close else 0.0
+            # random_value = 0.0
             if random_value <= trading_prob:
                 return (
-                    ("OpenShort", action)
+                    ("OpenShort", action, jump_flag)
                     if current_holding == 0
-                    else ("CloseLong", action)
+                    else ("CloseLong", action, jump_flag)
                 )
-            return ("Keep", 0)
+            jump_flag = False
+            return ("Keep", 0, jump_flag)
 
         raise ValueError(f"Invalid action: {action}")
 
