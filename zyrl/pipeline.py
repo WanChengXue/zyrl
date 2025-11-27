@@ -169,32 +169,32 @@ class LowLevelPipeline(Pipeline):
         buffer_size = self._config.get("trainer.buffer_size")
         train_num = self._config.get("trainer.train_num")
         if isinstance(self._env, str):
-            train_envs = ts.env.RayVectorEnv(
+            self._train_envs = ts.env.RayVectorEnv(
                 [lambda: gym.make(self._env) for _ in range(train_num)]
             )
         else:
-            train_envs = ts.env.RayVectorEnv(
+            self._train_envs = ts.env.RayVectorEnv(
                 [lambda: self._env() for _ in range(train_num)]
             )
         self._train_collector = ts.data.Collector(
             self._policy,
-            train_envs,
+            self._train_envs,
             ts.data.VectorReplayBuffer(buffer_size, train_num),
             exploration_noise=True,
         )
 
         test_num = self._config.get("trainer.test_num")
         if isinstance(self._env, str):
-            test_envs = ts.env.RayVectorEnv(
+            self._test_envs = ts.env.RayVectorEnv(
                 [lambda: gym.make(self._env) for _ in range(test_num)]
             )
         else:
-            test_envs = ts.env.RayVectorEnv(
+            self._test_envs = ts.env.RayVectorEnv(
                 [lambda: self._env() for _ in range(test_num)]
             )
 
         self._test_collector = ts.data.Collector(
-            self._policy, test_envs, exploration_noise=True
+            self._policy, self._test_envs, exploration_noise=True
         )
 
     def _create_trainer(self):
@@ -223,4 +223,11 @@ class LowLevelPipeline(Pipeline):
         )
 
     def fit(self):
-        self._trainer.run()
+        try:
+            self._trainer.run()
+        finally:
+            # 确保环境被正确关闭，释放子进程资源
+            if hasattr(self, "_train_envs"):
+                self._train_envs.close()
+            if hasattr(self, "_test_envs"):
+                self._test_envs.close()
